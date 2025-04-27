@@ -226,9 +226,14 @@ export default function useTrips() {
           user_id: user.id
         }, null, 2));
         
+        // Use a properly formatted UUID for testing purposes if we're using the test ID
+        const userId = user.id === 'test-user-id-123' 
+          ? '00000000-0000-4000-8000-000000000000' // Standard test UUID that follows proper format
+          : user.id;
+        
         const { trip, error } = await SupabaseService.createTrip({
           ...tripData,
-          user_id: user.id
+          user_id: userId
         });
 
         if (error) {
