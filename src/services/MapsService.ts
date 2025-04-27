@@ -123,6 +123,44 @@ class MapsService {
     }
   }
 
+  // Add getRoute method to fix the error
+  async getRoute(
+    origin: string | Location,
+    destination: string | Location,
+    waypoints: Location[] = []
+  ): Promise<{ route: RouteResult | null; error: Error | null }> {
+    try {
+      // Convert string locations to Location objects if needed
+      const originLocation = typeof origin === 'string' 
+        ? await this.geocodeAddress(origin) 
+        : origin;
+      
+      const destinationLocation = typeof destination === 'string'
+        ? await this.geocodeAddress(destination)
+        : destination;
+      
+      // Set default driving preferences
+      const drivingPrefs: DrivingPreferences = {
+        maxDrivingTime: 8, // 8 hours default
+        preferScenic: true,
+        avoidTolls: false,
+        avoidHighways: false
+      };
+      
+      const route = await this.planRouteWithGoogleMaps(
+        originLocation,
+        destinationLocation,
+        waypoints,
+        drivingPrefs
+      );
+      
+      return { route, error: null };
+    } catch (error) {
+      console.error('Route planning error:', error);
+      return { route: null, error: error as Error };
+    }
+  }
+
   // Reverse geocode coordinates to address
   async reverseGeocode(coords: Coordinates): Promise<Location> {
     try {
@@ -705,6 +743,80 @@ class MapsService {
     
     return coordinates;
   }
+
+  // Add searchLocation method
+  async searchLocation(query: string): Promise<{ locations: Location[] | null; error: Error | null }> {
+    try {
+      // Try to get from cache first
+      const cachedResults = await MapsOfflineCache.getCachedSearchResults(query);
+      if (cachedResults) {
+        return { locations: cachedResults, error: null };
+      }
+
+      const response = await axios.get('https://maps.googleapis.com/maps/api/place/autocomplete/json', {
+        params: {
+          input: query,
+          key: GOOGLE_MAPS_API_KEY,
+          types: 'geocode'
+        }
+      });
+
+      if (response.data.status !== 'OK') {
+        throw new Error(`Location search failed: ${response.data.status}`);
+      }
+
+      const locations: Location[] = await Promise.all(
+        response.data.predictions.map(async (prediction: any) => {
+          // Get details for each prediction to get coordinates
+          const details = await this.getPlaceDetails(prediction.place_id);
+          return {
+            placeId: prediction.place_id,
+            address: prediction.description,
+            coordinates: details.coordinates,
+            mainText: prediction.structured_formatting?.main_text || prediction.description,
+            secondaryText: prediction.structured_formatting?.secondary_text || ''
+          };
+        })
+      );
+
+      // Cache results
+      await MapsOfflineCache.cacheSearchResults(query, locations);
+
+      return { locations, error: null };
+    } catch (error) {
+      console.error('Location search error:', error);
+      return { locations: null, error: error as Error };
+    }
+  }
+
+  // Add helper method for Place details
+  private async getPlaceDetails(placeId: string): Promise<{ coordinates: Coordinates }> {
+    try {
+      const response = await axios.get('https://maps.googleapis.com/maps/api/place/details/json', {
+        params: {
+          place_id: placeId,
+          fields: 'geometry',
+          key: GOOGLE_MAPS_API_KEY
+        }
+      });
+
+      if (response.data.status !== 'OK' || !response.data.result) {
+        throw new Error(`Place details failed: ${response.data.status}`);
+      }
+
+      return {
+        coordinates: {
+          latitude: response.data.result.geometry.location.lat,
+          longitude: response.data.result.geometry.location.lng
+        }
+      };
+    } catch (error) {
+      console.error('Place details error:', error);
+      throw error;
+    }
+  }
 }
 
-export default new MapsService(); 
+// Export singleton instance
+const mapsServiceInstance = new MapsService();
+export default mapsServiceInstance; 

@@ -261,18 +261,74 @@ const RoutePlannerScreen = () => {
         desert: selectedScenery.includes('desert')
       };
       
+      // First, geocode the city names to get coordinates
+      console.log("Geocoding starting location:", startLocation);
+      const startLocationResult = await searchLocation(startLocation);
+      if (!startLocationResult.success || !startLocationResult.locations || startLocationResult.locations.length === 0) {
+        throw new Error(`Could not geocode starting location: ${startLocation}`);
+      }
+      
+      console.log("Geocoding end location:", endLocation);
+      const endLocationResult = await searchLocation(endLocation);
+      if (!endLocationResult.success || !endLocationResult.locations || endLocationResult.locations.length === 0) {
+        throw new Error(`Could not geocode end location: ${endLocation}`);
+      }
+      
+      // Get the first result for each location
+      const startLocationData = startLocationResult.locations[0];
+      const endLocationData = endLocationResult.locations[0];
+      
+      // Display geocoding results for debugging
+      console.log("Geocoded start location:", startLocationData);
+      console.log("Geocoded end location:", endLocationData);
+      
+      // Now we can create properly structured location objects with actual coordinates
+      const startLocationObj = {
+        coordinates: startLocationData.coordinates,
+        address: startLocation
+      };
+      
+      const endLocationObj = {
+        coordinates: endLocationData.coordinates,
+        address: endLocation
+      };
+      
+      // Log the location objects we're sending to planRoute
+      console.log("Using start location object:", startLocationObj);
+      console.log("Using end location object:", endLocationObj);
+      
       const result = await planRoute({
-        startLocation,
-        endLocation,
+        startLocation: startLocationObj,
+        endLocation: endLocationObj,
         maxDriveTimeHours: maxDriveHours,
         sceneryPreferences
       });
 
-      if (!result.success || !result.route) {
+      if (!result.success || !result.route || !result.stops) {
         throw new Error(result.error?.message || 'Failed to calculate route');
       }
-
-      return result.route as RouteResult;
+      
+      // For now, construct a mock RouteResult that matches the interface our app expects
+      const mockRouteResult: RouteResult = {
+        startCoords: {
+          latitude: startLocationObj.coordinates.latitude,
+          longitude: startLocationObj.coordinates.longitude
+        },
+        endCoords: {
+          latitude: endLocationObj.coordinates.latitude,
+          longitude: endLocationObj.coordinates.longitude
+        },
+        recommendedStops: result.stops.map(stop => ({
+          date: new Date().toISOString().split('T')[0], // Just use today's date for now
+          location: {
+            latitude: stop.coordinates.latitude,
+            longitude: stop.coordinates.longitude,
+            address: stop.address || `Location near ${stop.coordinates.latitude}, ${stop.coordinates.longitude}`
+          }
+        }))
+      };
+      
+      return mockRouteResult;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
       throw new Error(errorMessage);

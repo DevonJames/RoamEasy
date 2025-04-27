@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Prefixes for AsyncStorage keys
 const LOCATION_CACHE_PREFIX = 'map_location_';
 const ROUTE_CACHE_PREFIX = 'map_route_';
+const SEARCH_CACHE_PREFIX = 'map_search_';
 
 /**
  * Provides caching functionality for map-related data
@@ -56,6 +57,32 @@ class MapsOfflineCache {
       return data ? JSON.parse(data) : null;
     } catch (error) {
       console.error('Error getting cached route:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Cache search results
+   */
+  static async cacheSearchResults(query: string, results: any[]): Promise<void> {
+    try {
+      const storageKey = `${SEARCH_CACHE_PREFIX}${query}`;
+      await AsyncStorage.setItem(storageKey, JSON.stringify(results));
+    } catch (error) {
+      console.error('Error caching search results:', error);
+    }
+  }
+
+  /**
+   * Get cached search results by query
+   */
+  static async getCachedSearchResults(query: string): Promise<any[] | null> {
+    try {
+      const storageKey = `${SEARCH_CACHE_PREFIX}${query}`;
+      const data = await AsyncStorage.getItem(storageKey);
+      return data ? JSON.parse(data) : null;
+    } catch (error) {
+      console.error('Error getting cached search results:', error);
       return null;
     }
   }

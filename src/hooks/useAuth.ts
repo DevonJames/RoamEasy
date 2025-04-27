@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, Session, User } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@env';
+import SupabaseService from '../services/SupabaseService';
+import { AuthSession } from '@supabase/supabase-js';
 
 // Use environment variables
 const supabaseUrl = SUPABASE_URL || '';
@@ -19,189 +21,149 @@ export interface AuthUser {
   fullName?: string;
 }
 
+export interface AuthState {
+  user: User | null;
+  session: AuthSession | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  error: Error | null;
+}
+
 const useAuth = () => {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  // TEMPORARY FOR TESTING: Set isGuest to true by default
-  const [isGuest, setIsGuest] = useState<boolean>(true);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [state, setState] = useState<AuthState>({
+    user: null,
+    session: null,
+    isAuthenticated: false,
+    isLoading: true,
+    error: null,
+  });
 
-  // Initialize auth state
+  // Load user on mount
   useEffect(() => {
-    const initAuth = async () => {
+    const fetchSession = async () => {
       try {
-        // TEMPORARY FOR TESTING: Short-circuit and set guest mode
-        setIsLoading(false);
-        setIsGuest(true);
-        // Add a placeholder user for testing
-        setUser({
-          id: 'guest-user-id',
-          email: 'guest@example.com',
-          fullName: 'Guest User'
+        setState(prev => ({ ...prev, isLoading: true }));
+        
+        // TEMPORARY: Set a mock authenticated user for testing
+        // In a real app, this would be:
+        // const session = await SupabaseService.getSession();
+        
+        // Mock session for testing
+        const mockUser = {
+          id: 'test-user-id-123',
+          email: 'test@example.com',
+          app_metadata: { provider: 'email' },
+          user_metadata: { full_name: 'Test User' },
+          created_at: new Date().toISOString()
+        } as User;
+        
+        const mockSession = {
+          user: mockUser,
+          access_token: 'mock-token',
+          refresh_token: 'mock-refresh',
+          expires_at: Date.now() + 3600 * 1000 // 1 hour
+        } as AuthSession;
+        
+        setState({
+          user: mockUser,
+          session: mockSession,
+          isAuthenticated: true,
+          isLoading: false,
+          error: null,
         });
-        await AsyncStorage.setItem('guest_mode', 'true');
-        console.log('⚠️ TESTING MODE: Automatically using guest mode');
-        return;
 
-        // Original authentication code (currently bypassed)
-        /*
-        setIsLoading(true);
+        // Listen for auth state changes in a real implementation
+        // const { data: authListener } = SupabaseService.onAuthStateChange((event, session) => {
+        //   setState(prev => ({
+        //     ...prev,
+        //     user: session?.user || null,
+        //     session,
+        //     isAuthenticated: !!session?.user,
+        //   }));
+        // });
         
-        // Check for existing session
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session) {
-          setSession(session);
-          setUser({
-            id: session.user.id,
-            email: session.user.email || '',
-            fullName: session.user.user_metadata?.full_name,
-          });
-          setIsAuthenticated(true);
-        } else {
-          // Check if guest mode is active
-          const guestMode = await AsyncStorage.getItem('guest_mode');
-          if (guestMode === 'true') {
-            setIsGuest(true);
-          }
-        }
-        */
+        // return () => {
+        //   authListener?.unsubscribe();
+        // };
       } catch (error) {
-        console.error('Auth initialization error:', error);
-      } finally {
-        setIsLoading(false);
+        setState({
+          user: null,
+          session: null,
+          isAuthenticated: false,
+          isLoading: false,
+          error: error as Error,
+        });
       }
     };
 
-    initAuth();
-
-    // Skip auth subscription for testing
-    return () => {
-      // No cleanup needed in test mode
-    };
-
-    /*
-    // Original auth subscription (currently bypassed)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (session) {
-          setSession(session);
-          setUser({
-            id: session.user.id,
-            email: session.user.email || '',
-            fullName: session.user.user_metadata?.full_name,
-          });
-          setIsAuthenticated(true);
-          setIsGuest(false);
-        } else {
-          setSession(null);
-          setUser(null);
-          setIsAuthenticated(false);
-        }
-      }
-    );
-
-    // Cleanup
-    return () => {
-      subscription.unsubscribe();
-    };
-    */
+    fetchSession();
   }, []);
 
-  // Sign in with email/password
   const signIn = useCallback(async (email: string, password: string) => {
     try {
-      setIsLoading(true);
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) {
-        return { success: false, error };
-      }
-
+      setState(prev => ({ ...prev, isLoading: true, error: null }));
+      
+      // In real implementation:
+      // const result = await SupabaseService.signIn(email, password);
+      // if (result.error) throw result.error;
+      
+      // For testing just return success
+      console.log('Sign in called with:', email, password);
+      
       return { success: true };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error : new Error('Sign in failed') 
-      };
-    } finally {
-      setIsLoading(false);
+      setState(prev => ({ ...prev, isLoading: false, error: error as Error }));
+      return { success: false, error: error as Error };
     }
   }, []);
 
-  // Sign up with email/password
-  const signUp = useCallback(async (email: string, password: string, fullName: string) => {
+  const signUp = useCallback(async (email: string, password: string) => {
     try {
-      setIsLoading(true);
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-          },
-        },
-      });
-
-      if (error) {
-        return { success: false, error };
-      }
-
-      // Create user profile
-      if (data.user) {
-        await supabase
-          .from('user_profiles')
-          .insert({
-            user_id: data.user.id,
-            full_name: fullName,
-            is_guest: false,
-          });
-      }
-
+      setState(prev => ({ ...prev, isLoading: true, error: null }));
+      
+      // In real implementation:
+      // const result = await SupabaseService.signUp(email, password);
+      // if (result.error) throw result.error;
+      
+      // For testing just return success
+      console.log('Sign up called with:', email, password);
+      
       return { success: true };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error : new Error('Sign up failed') 
-      };
-    } finally {
-      setIsLoading(false);
+      setState(prev => ({ ...prev, isLoading: false, error: error as Error }));
+      return { success: false, error: error as Error };
     }
   }, []);
 
-  // Sign out
   const signOut = useCallback(async () => {
     try {
-      setIsLoading(true);
-      const { error } = await supabase.auth.signOut();
-
-      if (error) {
-        return { success: false, error };
-      }
-
-      setIsGuest(false);
-      await AsyncStorage.removeItem('guest_mode');
+      setState(prev => ({ ...prev, isLoading: true, error: null }));
+      
+      // In real implementation:
+      // await SupabaseService.signOut();
+      
+      // For testing, just reset state
+      setState({
+        user: null,
+        session: null,
+        isAuthenticated: false,
+        isLoading: false,
+        error: null,
+      });
+      
       return { success: true };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error : new Error('Sign out failed') 
-      };
-    } finally {
-      setIsLoading(false);
+      setState(prev => ({ ...prev, isLoading: false, error: error as Error }));
+      return { success: false, error: error as Error };
     }
   }, []);
 
   // Continue as guest
   const continueAsGuest = useCallback(async () => {
     try {
-      setIsLoading(true);
+      setState(prev => ({ ...prev, isLoading: true }));
       await AsyncStorage.setItem('guest_mode', 'true');
-      setIsGuest(true);
+      setState(prev => ({ ...prev, isAuthenticated: false, user: null, session: null }));
       return { success: true };
     } catch (error) {
       return { 
@@ -209,14 +171,14 @@ const useAuth = () => {
         error: error instanceof Error ? error : new Error('Guest mode failed') 
       };
     } finally {
-      setIsLoading(false);
+      setState(prev => ({ ...prev, isLoading: false }));
     }
   }, []);
 
   // Sign in with Google
   const signInWithGoogle = useCallback(async () => {
     try {
-      setIsLoading(true);
+      setState(prev => ({ ...prev, isLoading: true }));
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
       });
@@ -232,14 +194,14 @@ const useAuth = () => {
         error: error instanceof Error ? error : new Error('Google sign in failed') 
       };
     } finally {
-      setIsLoading(false);
+      setState(prev => ({ ...prev, isLoading: false }));
     }
   }, []);
 
   // Sign in with Apple
   const signInWithApple = useCallback(async () => {
     try {
-      setIsLoading(true);
+      setState(prev => ({ ...prev, isLoading: true }));
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'apple',
       });
@@ -255,14 +217,14 @@ const useAuth = () => {
         error: error instanceof Error ? error : new Error('Apple sign in failed') 
       };
     } finally {
-      setIsLoading(false);
+      setState(prev => ({ ...prev, isLoading: false }));
     }
   }, []);
 
   // Sign in with Facebook
   const signInWithFacebook = useCallback(async () => {
     try {
-      setIsLoading(true);
+      setState(prev => ({ ...prev, isLoading: true }));
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'facebook',
       });
@@ -278,14 +240,14 @@ const useAuth = () => {
         error: error instanceof Error ? error : new Error('Facebook sign in failed') 
       };
     } finally {
-      setIsLoading(false);
+      setState(prev => ({ ...prev, isLoading: false }));
     }
   }, []);
 
   // Reset password
   const resetPassword = useCallback(async (email: string) => {
     try {
-      setIsLoading(true);
+      setState(prev => ({ ...prev, isLoading: true }));
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: 'roameasy://reset-password',
       });
@@ -301,19 +263,12 @@ const useAuth = () => {
         error: error instanceof Error ? error : new Error('Password reset failed') 
       };
     } finally {
-      setIsLoading(false);
+      setState(prev => ({ ...prev, isLoading: false }));
     }
   }, []);
 
   return {
-    user,
-    session,
-    isLoading,
-    isAuthenticated,
-    isGuest,
-    signIn,
-    signUp,
-    signOut,
+    ...state,
     continueAsGuest,
     signInWithGoogle,
     signInWithApple,

@@ -262,11 +262,11 @@ class SupabaseService {
     }
   }
 
-  async createTrip(userId: string, tripName: string): Promise<{ trip: Trip | null; error: Error | null }> {
+  async createTrip(tripData: any): Promise<{ trip: Trip | null; error: Error | null }> {
     try {
       const { data, error } = await this.supabase
         .from('trips')
-        .insert({ user_id: userId, name: tripName })
+        .insert(tripData)
         .select()
         .single();
       
@@ -276,6 +276,7 @@ class SupabaseService {
       
       return { trip: data as Trip, error: null };
     } catch (error) {
+      console.error('Error creating trip:', error);
       return { trip: null, error: error as Error };
     }
   }

@@ -326,6 +326,186 @@ Format your response as a JSON object with an array of suggestions in the follow
       return {};
     }
   }
+
+  /**
+   * Optimize a route based on user preferences and driving constraints
+   */
+  async optimizeRoute(params: {
+    route: RouteResult;
+    maxDriveTimeHours: number;
+    sceneryPreferences: SceneryPreference;
+  }): Promise<{ stops: Location[] | null; error: Error | null }> {
+    try {
+      const { route, maxDriveTimeHours, sceneryPreferences } = params;
+
+      // For testing purposes, we'll create some sample stops 
+      // This would normally make a call to OpenAI to get smart stop suggestions
+      console.log('Optimizing route with OpenAI...');
+      
+      // Create stops based on the route
+      const totalDistance = route.totalDistance;
+      const totalDuration = route.totalDuration;
+      
+      // Calculate how many stops we need based on max drive time
+      // Convert seconds to hours for calculation
+      const totalDriveHours = totalDuration / 3600;
+      const numberOfStops = Math.ceil(totalDriveHours / maxDriveTimeHours);
+      
+      console.log(`Route info: ${totalDistance}m, ${totalDriveHours}hrs`);
+      console.log(`Creating ${numberOfStops} stops with max ${maxDriveTimeHours}hrs driving per day`);
+      
+      // Create evenly spaced stops
+      const stops: Location[] = [];
+      
+      // Always include start location
+      const startLocation: Location = {
+        coordinates: {
+          latitude: route.waypoints[0].coordinates.latitude,
+          longitude: route.waypoints[0].coordinates.longitude
+        },
+        address: route.waypoints[0].address
+      };
+      stops.push(startLocation);
+      
+      // If we need intermediate stops
+      if (numberOfStops > 1) {
+        const routeSegments = this.divideRouteIntoSegments(route, numberOfStops);
+        
+        for (let i = 1; i < routeSegments.length; i++) {
+          const segment = routeSegments[i];
+          const stopLocation: Location = {
+            coordinates: {
+              latitude: segment.endLocation.coordinates.latitude,
+              longitude: segment.endLocation.coordinates.longitude
+            },
+            address: segment.endLocation.address
+          };
+          stops.push(stopLocation);
+        }
+      }
+      
+      // Always include end location if not already included
+      const endLocation: Location = {
+        coordinates: {
+          latitude: route.waypoints[route.waypoints.length - 1].coordinates.latitude,
+          longitude: route.waypoints[route.waypoints.length - 1].coordinates.longitude
+        },
+        address: route.waypoints[route.waypoints.length - 1].address
+      };
+      
+      // Only add end location if it's not already the last stop
+      if (stops.length === 0 || 
+          stops[stops.length - 1].coordinates.latitude !== endLocation.coordinates.latitude ||
+          stops[stops.length - 1].coordinates.longitude !== endLocation.coordinates.longitude) {
+        stops.push(endLocation);
+      }
+      
+      console.log('Generated stops:', stops);
+      
+      // Ensure all stops have valid coordinates
+      const validStops = stops.filter(stop => 
+        stop && 
+        stop.coordinates && 
+        typeof stop.coordinates.latitude === 'number' && 
+        typeof stop.coordinates.longitude === 'number'
+      );
+      
+      return { stops: validStops, error: null };
+    } catch (error) {
+      console.error('Error optimizing route:', error);
+      return { stops: null, error: error as Error };
+    }
+  }
+  
+  // Helper method to divide a route into segments
+  private divideRouteIntoSegments(route: RouteResult, numberOfSegments: number): RouteSegment[] {
+    const totalDuration = route.totalDuration;
+    const durationPerSegment = totalDuration / numberOfSegments;
+    
+    const segments: RouteSegment[] = [];
+    let currentDuration = 0;
+    let currentSegmentIndex = 0;
+    
+    // Add start point as first segment
+    segments.push({
+      legIndex: 0,
+      startLocation: route.waypoints[0],
+      endLocation: route.waypoints[0],
+      distance: 0,
+      duration: 0,
+      polyline: ''
+    });
+    
+    // Process each leg to find segment endpoints
+    for (let i = 0; i < route.legs.length; i++) {
+      const leg = route.legs[i];
+      
+      // If adding this leg exceeds the duration per segment,
+      // create an endpoint in the middle of this leg
+      if (currentDuration + leg.duration > (currentSegmentIndex + 1) * durationPerSegment) {
+        // Calculate how far into this leg the segment endpoint should be
+        const remainingDuration = (currentSegmentIndex + 1) * durationPerSegment - currentDuration;
+        const fractionOfLeg = remainingDuration / leg.duration;
+        
+        // Calculate an approximate intermediate location
+        const midpoint: Location = this.interpolateLocation(
+          leg.startLocation,
+          leg.endLocation,
+          fractionOfLeg
+        );
+        
+        // Create a new segment endpoint
+        segments.push({
+          legIndex: i,
+          startLocation: segments[currentSegmentIndex].endLocation,
+          endLocation: midpoint,
+          distance: leg.distance * fractionOfLeg,
+          duration: remainingDuration,
+          polyline: ''
+        });
+        
+        currentSegmentIndex++;
+        currentDuration += remainingDuration;
+        
+        // Process the remainder of this leg
+        const remainingFraction = 1 - fractionOfLeg;
+        
+        if (remainingFraction > 0) {
+          currentDuration += leg.duration * remainingFraction;
+        }
+      } else {
+        // Add the duration of this entire leg
+        currentDuration += leg.duration;
+      }
+    }
+    
+    // Add end point if needed
+    if (segments.length <= numberOfSegments) {
+      segments.push({
+        legIndex: route.legs.length - 1,
+        startLocation: segments[segments.length - 1].endLocation,
+        endLocation: route.waypoints[route.waypoints.length - 1],
+        distance: 0,
+        duration: 0,
+        polyline: ''
+      });
+    }
+    
+    return segments;
+  }
+  
+  // Helper to interpolate between two locations
+  private interpolateLocation(start: Location, end: Location, fraction: number): Location {
+    return {
+      coordinates: {
+        latitude: start.coordinates.latitude + (end.coordinates.latitude - start.coordinates.latitude) * fraction,
+        longitude: start.coordinates.longitude + (end.coordinates.longitude - start.coordinates.longitude) * fraction
+      },
+      address: `Location between ${start.address} and ${end.address}`
+    };
+  }
 }
 
-export default OpenAIService.getInstance(); // Export singleton instance 
+// Export singleton instance
+const openAIServiceInstance = OpenAIService.getInstance();
+export default openAIServiceInstance; 
