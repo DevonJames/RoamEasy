@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../utils/environment';
+import { Alert } from 'react-native';
 
 // Types
 export interface User {
@@ -264,17 +265,64 @@ class SupabaseService {
 
   async createTrip(tripData: any): Promise<{ trip: Trip | null; error: Error | null }> {
     try {
+      console.log('Creating trip with data:', JSON.stringify(tripData, null, 2));
+      
+      // First run a database check to ensure tables exist
+      const dbCheck = await this.checkDatabase();
+      if (!dbCheck.success) {
+        console.error('Database check failed:', dbCheck.error);
+        return { 
+          trip: null, 
+          error: new Error(`Database setup issue: ${dbCheck.error}. Please check that all required tables exist.`) 
+        };
+      }
+      
+      // Check for required fields
+      if (!tripData.user_id) {
+        console.error('Missing required field: user_id');
+        return { trip: null, error: new Error('Missing required field: user_id') };
+      }
+      
+      if (!tripData.name) {
+        console.error('Missing required field: name');
+        return { trip: null, error: new Error('Missing required field: name') };
+      }
+      
+      // Create the trip with minimal data
+      const minimalTripData = {
+        user_id: tripData.user_id,
+        name: tripData.name
+      };
+      
+      console.log('Inserting trip data:', JSON.stringify(minimalTripData, null, 2));
+      
       const { data, error } = await this.supabase
         .from('trips')
-        .insert(tripData)
+        .insert(minimalTripData)
         .select()
         .single();
       
       if (error) {
-        throw error;
+        console.error('Error creating trip:', error);
+        
+        // Check for common errors
+        if (error.message.includes('permission denied') || error.message.includes('policy')) {
+          return { trip: null, error: new Error(`Row Level Security error: ${error.message}`) };
+        }
+        
+        if (error.message.includes('does not exist')) {
+          return { trip: null, error: new Error(`Table does not exist: ${error.message}. Run the setup SQL from README.`) };
+        }
+        
+        return { trip: null, error: new Error(`Database error: ${error.message}`) };
       }
       
-      return { trip: data as Trip, error: null };
+      if (data) {
+        console.log('Trip created successfully:', data);
+        return { trip: data as Trip, error: null };
+      }
+      
+      return { trip: null, error: new Error('Failed to create trip - no data returned') };
     } catch (error) {
       console.error('Error creating trip:', error);
       return { trip: null, error: error as Error };
@@ -477,6 +525,85 @@ class SupabaseService {
       email: user.email,
       created_at: user.created_at,
     };
+  }
+
+  /**
+   * Check database schema and tables
+   */
+  async checkDatabase(): Promise<{ success: boolean; tables?: string[]; error?: string }> {
+    try {
+      console.log('Checking database connection and schema...');
+      
+      // Get a list of tables
+      const tablesList: string[] = [];
+      try {
+        // Try direct query to information_schema
+        const { data, error } = await this.supabase
+          .from('information_schema.tables')
+          .select('table_name')
+          .eq('table_schema', 'public');
+          
+        if (error) {
+          console.error('Failed to query information_schema:', error);
+          return { success: false, error: `Failed to list tables: ${error.message}` };
+        } else if (data) {
+          for (const table of data) {
+            tablesList.push(table.table_name);
+          }
+          console.log('Available tables:', tablesList);
+        }
+      } catch (err) {
+        console.error('Failed to get tables list:', err);
+        return { 
+          success: false, 
+          error: `Could not list tables: ${err instanceof Error ? err.message : String(err)}` 
+        };
+      }
+      
+      if (tablesList.length === 0) {
+        return { success: false, error: 'Could not retrieve tables list or no tables exist' };
+      }
+      
+      // Check for required tables
+      const requiredTables = ['trips', 'trip_stops', 'resorts', 'user_profiles'];
+      const missingTables = requiredTables.filter(table => !tablesList.includes(table));
+      
+      if (missingTables.length > 0) {
+        return { 
+          success: false, 
+          tables: tablesList, 
+          error: `Missing required tables: ${missingTables.join(', ')}` 
+        };
+      }
+      
+      // Check trips table structure
+      try {
+        const { error: tripsError } = await this.supabase.from('trips')
+          .select('id, name, user_id')
+          .limit(1);
+        
+        if (tripsError) {
+          return { 
+            success: false, 
+            tables: tablesList, 
+            error: `Trips table has incorrect structure: ${tripsError.message}` 
+          };
+        }
+      } catch (err) {
+        return { 
+          success: false, 
+          tables: tablesList, 
+          error: `Error checking trips table: ${err instanceof Error ? err.message : String(err)}` 
+        };
+      }
+      
+      return { success: true, tables: tablesList };
+    } catch (err) {
+      return { 
+        success: false, 
+        error: `Database check failed: ${err instanceof Error ? err.message : String(err)}` 
+      };
+    }
   }
 }
 

@@ -221,29 +221,37 @@ export default function useTrips() {
         return { success: true, trip: newTrip };
       } else if (isConnected) {
         // For registered users, save to Supabase
-        const { data, error } = await SupabaseService.createTrip({
+        console.log('Creating trip in Supabase:', JSON.stringify({
+          ...tripData,
+          user_id: user.id
+        }, null, 2));
+        
+        const { trip, error } = await SupabaseService.createTrip({
           ...tripData,
           user_id: user.id
         });
 
         if (error) {
+          console.error('Supabase error:', error);
           throw error;
         }
 
-        if (data) {
+        if (trip) {
           // Cache for offline use
-          await OfflineService.cacheTrip(data);
+          await OfflineService.cacheTrip(trip);
 
           // Update state
           setState(prev => ({
             ...prev,
-            trips: [...prev.trips, data],
-            currentTrip: data,
+            trips: [...prev.trips, trip],
+            currentTrip: trip,
             isLoading: false
           }));
 
-          return { success: true, trip: data };
+          return { success: true, trip };
         }
+        
+        throw new Error('Failed to create trip in Supabase');
       } else {
         // Offline but registered - store locally and sync later
         const now = new Date().toISOString();
@@ -272,9 +280,8 @@ export default function useTrips() {
 
         return { success: true, trip: newTrip };
       }
-
-      return { success: false, error: new Error('Failed to create trip') };
     } catch (err) {
+      console.error('Error in createTrip:', err);
       setState(prev => ({
         ...prev,
         error: err as Error,

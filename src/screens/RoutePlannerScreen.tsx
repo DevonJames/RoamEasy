@@ -22,6 +22,8 @@ import useMaps from '../hooks/useMaps';
 import { usePreferences } from '../hooks/usePreferences';
 import useTrips, { TripStop } from '../hooks/useTrips';
 import { debounce } from 'lodash';
+import SupabaseService from '../services/SupabaseService';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../utils/environment';
 
 // Define navigation types
 type RootStackParamList = {
@@ -129,6 +131,60 @@ const RoutePlannerScreen = () => {
       }
     }
   }, [preferences]);
+
+  // Test Supabase connection on mount
+  useEffect(() => {
+    async function testSupabaseConnection() {
+      console.log('Testing Supabase connection...');
+      console.log('URL:', SUPABASE_URL);
+      console.log('Key:', SUPABASE_ANON_KEY ? 'Exists (not shown for security)' : 'Missing');
+      
+      try {
+        // First check the database schema
+        const dbCheck = await SupabaseService.checkDatabase();
+        if (!dbCheck.success) {
+          console.error('Database check failed:', dbCheck.error);
+          console.log('Available tables:', dbCheck.tables);
+          
+          if (dbCheck.tables && dbCheck.tables.length > 0) {
+            Alert.alert(
+              'Database Error',
+              `The app cannot connect to the required tables. Please check the Supabase project setup.\n\nError: ${dbCheck.error}`,
+              [{ text: 'OK' }]
+            );
+          } else {
+            Alert.alert(
+              'Database Connection Error',
+              'Cannot connect to Supabase. Please check your internet connection and API keys.',
+              [{ text: 'OK' }]
+            );
+          }
+          return;
+        }
+        
+        console.log('Database check passed, tables:', dbCheck.tables);
+        
+        // Test retrieving trips as well
+        const testUserId = '00000000-0000-0000-0000-000000000000';
+        const { trips, error } = await SupabaseService.getTrips(testUserId);
+          
+        if (error) {
+          console.error('Error accessing trips table:', error);
+        } else {
+          console.log('Successfully connected to trips table, found trips:', trips.length);
+        }
+      } catch (err) {
+        console.error('Failed to test Supabase connection:', err);
+        Alert.alert(
+          'Connection Error',
+          'An unexpected error occurred while connecting to the database.',
+          [{ text: 'OK' }]
+        );
+      }
+    }
+    
+    testSupabaseConnection();
+  }, []);
 
   // Search locations with debounce
   const debouncedSearchStart = useCallback(
