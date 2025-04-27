@@ -1,0 +1,147 @@
+---
+description: Apply these rules when making changes to the project
+globs:
+alwaysApply: true
+---
+
+Update this rule if user requested changes to the project requirement, etc.
+# Frontend Guideline Document for RoamEasy
+
+## 1. Frontend Architecture
+
+### Overview
+
+RoamEasy is built as a cross-platform mobile app using React Native and TypeScript. We leverage a component-based architecture paired with modern state management and offline-first techniques to deliver a scalable, maintainable, and high-performance experience on both iOS (14+) and Android (10+).
+
+### Key Frameworks & Libraries
+
+*   **React Native (TypeScript):** Core UI framework for iOS and Android.
+*   **React Navigation v6:** Screen and deep-link navigation.
+*   **Redux Toolkit + Redux Persist:** Global state management with persistence in AsyncStorage or SQLite.
+*   **React Native AsyncStorage / SQLite:** Offline storage of user trips, maps, and resort data.
+*   **React Native Maps (Google / Apple):** Map display and routing overlays.
+*   **Styled-Components (or Emotion):** Theming and styled UI components.
+*   **OpenAI & ElevenLabs SDKs:** AI-driven resort recommendations and voiceover support.
+
+### Scalability, Maintainability & Performance
+
+*   **Modular Components:** Break UI into reusable, well-scoped components. Easier to add new features.
+*   **Separation of Concerns:** UI, state, business logic, and services each live in their own folders.
+*   **Lazy Loading & Code Splitting:** Load map screens or AI-heavy modules only when needed.
+*   **Offline-First:** Cache maps and trip data locally. App works seamlessly without connectivity.
+
+## 2. Design Principles
+
+1.  **Usability:** Clear, step-by-step trip planner. Large tap targets and obvious next steps.
+2.  **Accessibility:** High-contrast color modes, dynamic font sizing, VoiceOver support powered by ElevenLabs.
+3.  **Responsiveness:** Layout adapts from small phones to large tablets.
+4.  **Consistency:** Uniform button styles, iconography, and spacing across screens.
+5.  **Delight & Fun:** Friendly UX copy (“Let’s hit the road!”), subtle animations for transitions.
+
+### Applying Principles
+
+*   Forms use descriptive labels and inline validation messages.
+*   All images and icons include accessibility labels.
+*   Color-blind safe palettes and a toggle for high-contrast mode.
+*   “Save & Exit” buttons fixed at bottoms of major flows.
+
+## 3. Styling and Theming
+
+### Styling Approach
+
+*   **Styled-Components:** Encapsulate styles within components. Use a central `ThemeProvider`.
+*   **Atomic CSS Patterns:** Base primitives (atoms) like `Button`, `Text`, `Card` reused throughout.
+
+### Theming
+
+*   Light and Dark mode support.
+
+*   Theme variables defined in a single `theme.ts`:
+
+    *   Primary, secondary, accent colors
+    *   Font sizes, spacing, border radii
+
+### Visual Style
+
+*   **Style:** Modern flat design with subtle glassmorphism for cards (semi-transparent backgrounds with light blur).
+
+*   **Color Palette:**
+
+    *   Forest Green: #2E7D32
+    *   Sunset Orange: #FF7043
+    *   Sky Blue: #42A5F5
+    *   Sand: #FFF8E1
+    *   Charcoal: #37474F
+
+*   **Font:** System defaults (San Francisco on iOS, Roboto on Android). Fallback: Open Sans.
+
+## 4. Component Structure
+
+### Folder Layout
+
+`src/ ├── components/ # Reusable UI pieces (atoms, molecules) │ ├── Button/ │ ├── Card/ │ └── MapPreview/ ├── screens/ # Page-level components (Stack screens) │ ├── Planner/ │ ├── Itinerary/ │ └── Settings/ ├── navigation/ # React Navigation setup ├── store/ # Redux slices and store config ├── services/ # API clients (Supabase, OpenAI, Maps) ├── hooks/ # Custom React hooks └── utils/ # Helpers, constants, types`
+
+### Reusability & Maintainability
+
+*   Each component folder contains its `.tsx`, `.styles.ts`, and tests.
+*   Follow the **Atomic Design** pattern: Atoms → Molecules → Organisms → Screens.
+
+## 5. State Management
+
+### Approach
+
+*   **Redux Toolkit:** Central store with slices for authentication, trip data, and UI preferences.
+*   **Redux Persist:** Keep key slices in AsyncStorage or SQLite for offline access.
+
+### Data Flow
+
+1.  **Actions & Thunks:** Async operations (e.g., fetching route from Google Maps) live in thunks.
+2.  **Selectors:** Memoized selectors retrieve current trip, user settings, and cached maps.
+3.  **Context API:** Lightweight context only for theming and locale, not global data.
+
+## 6. Routing and Navigation
+
+*   **React Navigation v6:** Combine a stack navigator for main flows and a bottom tab navigator for core areas (Planner, Itinerary, Profile).
+
+*   **Deep Linking:** Support invites/shares to open specific trips or map points.
+
+*   **Navigation Flow:**
+
+    1.  **Auth Stack:** Login, Sign Up, Guest Mode.
+
+    2.  **Main Tabs:**
+
+        *   Planner → Multi-step route input.
+        *   Itinerary → Map + details + notes.
+        *   Settings/Profile → Preferences, subscription.
+
+## 7. Performance Optimization
+
+*   **Lazy Loading Screens:** Use `React.lazy` and `Suspense` for heavy modules (maps, AI).
+*   **FlatList & VirtualizedList:** Efficiently render long resort lists.
+*   **Hermes Engine:** Enable Hermes on Android for faster JS startup.
+*   **Image Optimization:** Use `react-native-fast-image` with caching.
+*   **Offline Tile Caching:** Limit map tile cache size and purge old entries.
+
+## 8. Testing and Quality Assurance
+
+### Unit & Integration Tests
+
+*   **Jest:** Core test runner.
+*   **React Native Testing Library:** Test UI components and hooks.
+
+### End-to-End (E2E)
+
+*   **Detox:** Automated E2E tests on iOS and Android simulators.
+
+### QA Practices
+
+*   **Static Analysis:** ESLint and Prettier for code style.
+*   **Type Checking:** Strict TypeScript rules.
+*   **Pull Request Reviews:** Mandatory peer reviews with checklist (accessibility, performance, offline).
+
+## 9. Conclusion and Overall Frontend Summary
+
+RoamEasy’s frontend is a robust, component-driven React Native app designed for RV travelers. It balances a fun, easy-to-use interface with strong offline capabilities, AI-powered suggestions, and seamless calendar and booking integrations. By adhering to these guidelines—structured architecture, clear design principles, theming consistency, solid state management, and rigorous testing—we ensure the app is scalable, maintainable, and delivers a top-notch user experience on every journey.
+
+Happy coding and safe travels with RoamEasy! 🚐

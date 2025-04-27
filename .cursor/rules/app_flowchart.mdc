@@ -1,0 +1,30 @@
+---
+description: Apply these rules when making changes to the project
+globs:
+alwaysApply: true
+---
+
+Update this rule if user requested changes to the project requirement, etc.
+flowchart TD
+    A[Start]
+    A --> B[Splash Screen]
+    B --> C{Choose Mode}
+    C -->|Guest Mode| D[Browse Planner in Guest Mode]
+    C -->|Sign In Sign Up| E[Sign In Sign Up]
+    E --> F[Onboarding User Preferences]
+    D --> F
+    F --> G[Create New Trip]
+    G --> H[Enter Start End and Drive Time]
+    H --> I[Set Scenery Preferences]
+    I --> J[Plan Route and Stops]
+    J --> K[Show Resort Suggestions per Stop]
+    K --> L[Select Resorts for All Stops]
+    L --> M[Review and Customize Itinerary]
+    M --> N{Is User Registered}
+    N -->|No| O[Prompt Register or Login]
+    O --> E
+    N -->|Yes| P[Save Trip]
+    P --> Q[Export to Calendar]
+    Q --> R[Cache Data for Offline]
+    R --> S[Schedule Departure Notifications]
+    S --> T[End]

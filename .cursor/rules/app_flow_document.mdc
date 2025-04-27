@@ -1,0 +1,60 @@
+---
+description: Apply these rules when making changes to the project
+globs:
+alwaysApply: true
+---
+
+Update this rule if user requested changes to the project requirement, etc.
+# RoamEasy App Flow Document
+
+## Onboarding and Sign-In/Sign-Up
+
+When a brand-new user opens RoamEasy, they first see a bright and friendly splash screen featuring earthy greens and sunset oranges. From there, the user is invited to start planning in guest mode or to sign up. Choosing guest mode allows them to play with the route planner but reminds them that saving a trip requires registration. If the user decides to register, they are presented with an option to create an account using email and password or to log in using Apple, Google, or Facebook credentials. Each social login option takes the user through that provider’s standard authentication flow before returning them to RoamEasy.
+
+For email and password sign-up, the user enters their email, chooses a secure password, and taps “Create Account.” If they forget their password later, they tap the “Forgot Password” link on the sign-in screen, enter their email address, and receive a password reset link. The link brings them back to a secure form in the app where they enter and confirm a new password. Signing out is always available from the Settings page under the user’s profile section, returning them to the splash screen.
+
+## Main Dashboard or Home Page
+
+Once signed in, the user lands on the Home page, which shows a friendly greeting and a list of their saved trips. At the top there is a header bar with the app logo on the left, a profile icon on the right for quick access to Settings, and a prominent button labeled “Create New Trip.” Below this header, users see a scrolling view of trip cards, each showing the trip name, date range, and map thumbnail. A tab or menu at the bottom of the screen allows the user to switch between the Home view, the Trip Creation flow, and quick access to Offline Trips. From any point, tapping the Create button brings the user into the trip planning flow, and tapping a saved trip opens it for review or editing.
+
+## Detailed Feature Flows and Page Transitions
+
+### Creating a New Trip and Route Planning
+
+The user begins by tapping the Create New Trip button. They see a blank form where they enter a name for their trip and choose their start and end points on an interactive map. Large tap areas let the user search for cities or pan the map to place start and end markers. Below the map, a slider lets the user set their maximum daily driving time. A next button takes them to scenery preferences, where they indicate whether they want coast views, mountain passes, riverbanks, or forested paths. Once all preferences are set, the user taps “Plan Route” and the app calculates a multi-stop route, drawing colored legs on the map and placing big icons at each overnight stop.
+
+### Reviewing Stop-by-Stop Resort Suggestions
+
+After the route appears, each stop icon becomes tappable. Tapping a stop opens a full-screen overlay showing three to five resort cards that match the user’s RV length, hookup needs, cost limits, and scenery choices. Each card features a resort photo, nightly rate, user rating, phone number for direct contact, and the distance from the previous stop. Swiping left or right lets the user browse options, and tapping “View Details” opens the resort’s booking instructions and suggested site numbers. A back arrow returns the user to the map view with their current selections highlighted.
+
+### Itinerary Review and Customization
+
+When the user has selected resorts for all stops, a Review screen lists each day’s destination in order. The user can drag and drop days to change the order or tap a resort to swap it for another option. Under each night, an expandable notes field appears. Tapping it opens a text box where the user can type anything from party details to packing reminders. As text grows, the field expands to fit the content. Once the itinerary looks right, the user taps “Save & Exit.”
+
+### Manual Booking Support
+
+On the final itinerary page, each resort entry shows a “Booking Instructions” button. Tapping this brings up a small modal with a direct link to the resort’s reservation page, the suggested site number, and their phone number. If the link fails to load, the user sees a fallback message with the phone number prominently displayed and a suggestion to call for assistance.
+
+### Calendar Export and Sharing
+
+After saving, the app immediately offers to export the trip to the user’s calendar. In the export flow, the user chooses Google Calendar, iCloud Calendar, or a generic iCal file. They see a preview of events with check-in and check-out times for each stop. The user can toggle the visibility of site numbers, check-in/out times, and personal notes. Confirming this pushes the events into their chosen calendar app. A share button then opens the email composer with a neatly formatted itinerary; the user can enter any address and send it. If the user is still in guest mode, they receive a prompt to sign up before completing the export or share.
+
+### Offline Access and Map Caching
+
+As soon as the trip is saved, RoamEasy automatically caches the route map tiles, resort details, phone numbers, and notes into the on-device database. Offline Trips becomes active in the bottom menu. While offline, the user can open any saved trip, view maps, read resort cards, and even get turn-by-turn directions between stops, all without a network connection.
+
+### Notifications and Reminders
+
+Upon saving a trip, the user is prompted to specify how long it takes them to break camp. That prep time, combined with each resort’s check-out deadline, drives local notifications. On the day of each stop, a push notification tells the user when it is time to start packing. If the user returns to edit the route—changing drive times or swapping resorts—the app recalculates and updates the calendar events and reminder schedule automatically, then notifies the user of the updated plan.
+
+## Settings and Account Management
+
+The Settings page is accessible via the profile icon on the Home header. Here, the user can update their name, email, and password. A Preferences section lets them edit their RV and trailer lengths, pet information, cost range, hookup needs, and scenery priorities at any time. The Notifications section shows their prep time and lets them enable or disable reminders. Under Subscription, the user can see how many free trips they have used and tap “Upgrade” to purchase a premium plan. Accessibility options on this page let the user toggle larger font sizes, switch to high-contrast mode, or enable voiceover support for screen reading. When changes are saved, a brief confirmation toast pops up, and tapping Done brings them back to the Home page.
+
+## Error States and Alternate Paths
+
+If the user enters an unreachable start or end point, the map view shows an inline error message asking them to adjust the location. When network connectivity is missing during initial planning, RoamEasy warns that suggestions rely on an internet connection and offers to cache whatever data it can. If an API call fails, the user sees a fallback notification and can retry or continue with any cached results. Attempting to save more trips than the free allowance triggers a paywall overlay that explains the subscription tiers and offers to upgrade or continue in read-only mode. If the user tries to export the calendar while offline, they receive an alert asking them to connect to the internet and try again. Forgotten password requests that fail to send a reset email display a retry button and advice to check the email address spelling.
+
+## Conclusion and Overall App Journey
+
+A typical user journey begins with a friendly splash screen and a choice to test drive the planner or register. After entering vehicle dimensions and preferences, they name a new trip, set start and end points, specify if they want to spend more than one night at some or all locations along the trip, and let RoamEasy calculate daily legs. They tap through suggested resorts, add personal notes, and reorder stops until the itinerary feels perfect. Saving the trip triggers offline caching so maps and details are always at hand. The user exports their travel schedule to Google Calendar or iCal, shares a tidy email with friends, and gets helpful reminders each morning to break camp in time. Throughout this process, the user manages their profile and settings easily, upgrades to a premium plan when they hit the free-trip limit, and enjoys large tap targets, clear copy, and accessible design choices that make every step simple and stress-free.

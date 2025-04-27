@@ -1,0 +1,145 @@
+---
+description: Apply these rules when making changes to the project
+globs:
+alwaysApply: true
+---
+
+Update this rule if user requested changes to the project requirement, etc.
+# RoamEasy Project Requirements Document (PRD)
+
+## 1. Project Overview
+
+RoamEasy is a mobile app that helps RV travelers—especially retirees, snowbirds, families, and first‐timers—plan detailed, multi‐stop road trips. Users enter their start and end points, daily driving limits, scenery preferences (coast, mountains, forests, etc.), vehicle dimensions, budget, and amenity needs. The app then lays out an optimized route with recommended resorts at each stop, based on ratings and user filters. In the Minimum Viable Product (MVP), travelers manually book each stay but keep every detail—maps, site numbers, check-in instructions, personal notes—beautifully organized in one place.
+
+We’re building RoamEasy to remove the headache of scouring dozens of websites for campsites, calculating driving legs by hand, and cobbling together itineraries in spreadsheets or paper maps. The key success criteria for the MVP are:
+
+1.  Generate an accurate, preference-driven route with clear daily legs.
+2.  Provide relevant, filtered resort suggestions at each stop.
+3.  Offer a single, shareable itinerary that syncs to Google Calendar or iCal.
+4.  Work seamlessly offline once a trip is saved.
+5.  Drive user adoption of the freemium model (free routes → subscription).
+
+## 2. In-Scope vs. Out-of-Scope
+
+**In-Scope (MVP)**
+
+*   Guest mode browsing; account signup via email/password, Apple, Google, or social login
+*   Step-by-step onboarding for RV/trailer specs, cost & hookup preferences, pet info, scenery weights, daily drive limits
+*   Smart route planner using Google Maps API or OpenRouteService API and GPT-4-turbo organizing the users location preferences into useful map search data
+*   Stop-by-stop resort recommendations filtered by vehicle size, hookups, cost, scenery, user ratings
+*   Editable trip itinerary: reorder stops, swap resorts, expand “notes” per night
+*   Manual booking support: direct resort links, site-number suggestions, phone numbers
+*   Export to Google Calendar, Apple iCloud Calendar, or iCal as event series
+*   Offline caching of maps, itinerary data, resort details in local device database
+*   Local push notifications for departure reminders based on prep time + check-out
+*   Email sharing of a clean itinerary, with toggles to hide site numbers or check-in/out times
+*   Freemium subscription: up to X free trips, paid tiers unlock more routes
+*   Accessibility: large fonts, high-contrast mode, voiceover support (via ElevenLabs Conversation API)
+
+**Out-of-Scope (Phase 2+)**
+
+*   Automatic or in-app booking transactions
+*   Collaborative trip editing/sharing (beyond email view-only)
+*   Integration with Outlook or other non-Apple/Google calendars
+*   Real-time weather/traffic alerts
+*   AI-driven automated booking concierge
+*   In-app ads or affiliate booking modules
+*   Advanced social features (reviews, trip feeds, community)
+
+## 3. User Flow
+
+When a new user opens RoamEasy, they see a friendly splash screen in bright, earthy tones with large “Plan Now” and “Sign In” buttons. Tapping “Plan Now” enters guest mode. They can play with the route planner but are reminded to register before saving itineraries. Registering is a simple pop-up offering email/password, Apple, Google, or Facebook login.
+
+Once signed in or in guest mode, the onboarding wizard guides users to enter RV/trailer length, family/pet details, cost & hookup needs, and scenery priorities (coast, mountains, forest, riverside). They set maximum daily drive time via a slider. A summary map then confirms their preferences. Tapping “Create New Trip” brings up an interactive map where they mark the start and end points, name the trip, and hit “Plan Route.”
+
+RoamEasy calculates logical stopovers and displays tappable icons for each day’s end point. Selecting a stop opens a card with 3–5 resort options. Each card shows a photo, nightly rate, amenities, user rating, distance from the previous stop, phone number, and “Booking Instructions.” Users swipe to choose their preferred resort. After selecting all stops, they review the full itinerary in list form, reorder or swap stops, and add expandable notes for special events. Saving prompts calendar export (Google/iCal) and offline caching. Finally, they can email the itinerary to friends or family, toggling visibility of sensitive details like site numbers.
+
+## 4. Core Features
+
+*   **Authentication & Guest Mode**\
+    Email/password, Apple, Google, Facebook login. Guest mode allows planning but blocks saving.
+*   **Onboarding & User Preferences**\
+    RV/trailer dimensions, pets, cost range, hookups, scenery priorities, daily drive limit.
+*   **Smart Route Planner**\
+    Uses Google Maps or OpenRouteService APIs to generate optimally spaced daily legs and GPT-4-turbo via API to make final location decisions.
+*   **Resort Recommendations**\
+    Suggests ranked top options for resorts in each location, as chosen by GPT-4-turbo via API. Filters by vehicle size, hookups, cost, ratings, scenery. Displays resort cards with images, rates, phone, and booking links.
+*   **Trip Itinerary Management**\
+    Editable day-by-day plan with drag-and-drop reordering and expandable note fields.
+*   **Manual Booking Support**\
+    Direct external links, suggested site numbers, clear instructions, resort contact details.
+*   **Calendar Integration**\
+    Export full trip as an event series to Google Calendar, iCloud Calendar, or iCal.
+*   **Offline Caching**\
+    Maps, resort details, itinerary stored locally for zero-connectivity use.
+*   **Notifications & Reminders**\
+    Departure alerts based on prep time + resort check-out deadlines.
+*   **Email Sharing**\
+    Share a condensed itinerary via email, with toggles to show/hide site numbers and times.
+*   **Subscription Management**\
+    Freemium model: X free trips, upgrade to premium via Stripe (or similar) for unlimited routes.
+*   **Accessibility Features**\
+    Large tap targets, scalable fonts, high-contrast mode, voiceover support (ElevenLabs API).
+
+## 5. Tech Stack & Tools
+
+*   **Mobile Framework**: React Native (TypeScript)
+*   **Backend & Auth**: Supabase (Auth, Database)
+*   **Routing & Maps**:\
+    • Google Maps JavaScript SDK & Directions API\
+    • OpenRouteService REST API (fallback)
+*   **Calendar APIs**: Google Calendar API, Apple iCloud Calendar API, iCal export
+*   **Offline Storage**: React Native AsyncStorage or SQLite for maps & trip data
+*   **Notifications**: React Native Push Notification Library (local notifications)
+*   **Voiceover API**: ElevenLabs Conversation API for discussing changes and setting up new routes
+*   **Dev Tools**:\
+    • Cursor (AI-powered coding in VS Code)\
+    • Replit (online IDE & collaboration)
+*   **AI Integration**: In-app logic to parse resort info, GPT-4-turbo API to evaluate resort options based on user preferences; future LLM based agent for full data scraping & booking
+*   **Version Control & CI**: GitHub Actions, ESLint, Prettier
+
+## 6. Non-Functional Requirements
+
+*   **Performance**:\
+    • Initial route calculation & map display < 2 seconds on modern devices (iOS 14+, Android 10+)\
+    • Offline map tile load < 1 second per view
+*   **Security & Privacy**:\
+    • TLS for all API calls; data encryption at rest in Supabase\
+    • GDPR-compliant user data handling; clear privacy policy
+*   **Reliability & Availability**:\
+    • 99.5% uptime for core APIs (Supabase, Maps)\
+    • Graceful fallback if third-party API fails (show cached data)
+*   **Usability & Accessibility**:\
+    • All screens support dynamic font sizes\
+    • High-contrast mode toggle\
+    • Voiceover labels on all buttons & inputs\
+    • Tap targets ≥ 44×44 dp
+*   **Scalability**:\
+    • Supabase can handle up to 100k users in MVP\
+    • Stateless backend endpoints for easy horizontal scaling
+
+## 7. Constraints & Assumptions
+
+*   **API Keys & Rate Limits**:\
+    • Google Maps API key with daily quota ≥ 100k requests\
+    • OpenRouteService rate limit 2,000 requests/day; use caching to reduce hits\
+    • GPT-4-turbo API key with a limit of 128,000 tokens per request
+*   **Device Requirements**: iOS 14+ or Android 10+ recommended
+*   **Network**:\
+    • Assume Internet for initial planning but require full offline support after trip save\
+    • Calendar export requires occasional connectivity
+*   **User Data Accuracy**:\
+    • Trust users to enter correct RV/trailer dimensions & prep times
+*   **Subscription Billing**:\
+    • Stripe (or similar) integration handled server-side in Phase 1
+
+## 8. Known Issues & Potential Pitfalls
+
+*   **Map Tile Storage**: Offline caching can bloat device storage—implement intelligently sized tile sets per trip area.
+*   **API Rate Limits**: Excessive route recalculations may exceed quotas—cache routes and reuse until user changes preferences.
+*   **Resort Data Accuracy**: AI-driven parsing may pick up stale rates or broken links—display “last verified” timestamp and fallback “Contact resort” link.
+*   **Calendar Export Edge Cases**: Timezone mismatches could shift events; always store in UTC and convert locally.
+*   **Connectivity Fluctuations**: Partial downloads must retry seamlessly; show progress and fallback messages.
+*   **User Mistakes**: Invalid vehicle dimensions or unreachable end points—validate inputs and provide clear error messages.
+
+This document provides a single, unambiguous reference for the AI and future technical teams. All core functions, boundaries, user journeys, and engineering considerations are outlined so that subsequent technical specifications—frontend guidelines, backend structures, security rules, file layouts—can be generated without further clarification.

@@ -1,0 +1,160 @@
+---
+description: Apply these rules when making changes to the project
+globs:
+alwaysApply: true
+---
+
+Update this rule if user requested changes to the project requirement, etc.
+# RoamEasy Tech Stack Document
+
+This document explains, in everyday language, the technology choices behind RoamEasy. It shows how each tool and service helps build a reliable, user-friendly mobile app that plans multi-stop RV routes, suggests resorts, works offline, and keeps everyone on schedule.
+
+## 1. Frontend Technologies
+
+These tools power the app you see and touch on your phone.
+
+• React Native (with TypeScript)
+
+*   Lets us write one codebase that runs on both iOS and Android.
+*   TypeScript adds simple checks to catch mistakes early, leading to fewer crashes.
+
+• React Navigation
+
+*   Manages how you move between screens (for example, from the map view to the resort suggestions).
+*   Ensures smooth, predictable transitions and back-button support.
+
+• Styling (built-in StyleSheet + custom components)
+
+*   Uses familiar JavaScript objects to define colors, fonts, and layouts.
+*   Supports our “bright, earthy tones” theme (soft greens, sunset oranges, ocean blues).
+
+• Offline Storage (AsyncStorage or SQLite)
+
+*   Saves maps, resort details, and your trip data right on your device.
+*   Keeps your itinerary accessible even without cell service.
+
+• Push Notifications (React Native Push Notification Library)
+
+*   Triggers local reminders (for packing up or departure) based on your check-out times and prep durations.
+
+• Accessibility Support
+
+*   Large tap targets and scalable fonts for easier reading and tapping, especially on smaller screens.
+*   High-contrast mode and screen-reader labels (voiceover support) powered by the ElevenLabs Conversation API.
+
+**How these choices enhance your experience:**\
+You get one consistent app on both platforms, easy navigation, clear visuals, and reliable offline access—all built with accessibility in mind.
+
+## 2. Backend Technologies
+
+These services handle your data, user accounts, and the heavy lifting behind route planning.
+
+• Supabase (Authentication & Database)
+
+*   **Auth:** Manages email/password signup plus Apple, Google, and social logins.
+*   **Database:** Stores user profiles, trip plans, vehicle specs, and preferences securely.
+
+• AI & Routing Engines
+
+*   **GPT-4-Turbo (OpenAI API):** Helps interpret user preferences and rank resort options.
+*   **Google Maps API:** Calculates routes and driving legs, shows maps and directions.
+*   **OpenRouteService API:** Acts as a fallback routing engine if needed.
+
+• Calendar Services
+
+*   **Google Calendar API** and **iCloud Calendar API:** Let you export your trip as events into your personal calendars.
+*   **iCal Export:** Creates a standard calendar file (.ics) for other apps.
+
+**How these components work together:**\
+When you plan a trip, Supabase keeps your info safe, the routing APIs compute your daily stops, GPT-4-Turbo suggests the best resorts, and the calendar APIs push events to your schedule.
+
+## 3. Infrastructure and Deployment
+
+This setup keeps our code organized, tested, and running smoothly.
+
+• Version Control: GitHub
+
+*   All code lives in GitHub repositories, so we can track changes, review work, and roll back if needed.
+
+• Continuous Integration / Continuous Deployment (CI/CD): GitHub Actions
+
+*   Automatically runs tests, checks code style (ESLint, Prettier), and prepares builds whenever we push updates.
+
+• Development Environments
+
+*   **Cursor:** AI-powered IDE extensions for faster coding and real-time suggestions.
+*   **Replit:** Online IDE and collaboration space where we can prototype and demo features.
+
+• Hosting & Services
+
+*   Supabase’s managed servers handle authentication and database hosting—no servers for us to maintain.
+
+**Why these decisions matter:**\
+We catch bugs early, deploy updates safely, and keep services reliable—all without complicated server setups.
+
+## 4. Third-Party Integrations
+
+RoamEasy brings together several external services to deliver a seamless experience.
+
+• Google Maps SDK & Directions API
+
+*   Displays clean, interactive maps and computes driving routes.
+
+• OpenRouteService API
+
+*   Provides routing backup and alternative path calculations.
+
+• Google Calendar API, iCloud Calendar API, iCal Export
+
+*   Helps you sync trip events into your personal calendar apps.
+
+• ElevenLabs Conversation API
+
+*   Powers voiceover support and any in-app spoken guidance.
+
+• OpenAI GPT-4-Turbo API
+
+*   Analyzes your preferences and ranks resort options based on ratings, scenery, and your vehicle needs.
+
+• Stripe (or similar payment processor)
+
+*   Manages subscription billing for the freemium model.
+
+**Benefits of these integrations:**\
+You get reliable maps, smart suggestions, calendar syncing, spoken assistance, and easy payments—all without leaving the app.
+
+## 5. Security and Performance Considerations
+
+We’ve built safeguards and optimizations to keep your data safe and the app fast.
+
+• Security Measures
+
+*   All API calls use HTTPS/TLS encryption.
+*   User data is encrypted at rest in Supabase.
+*   Supabase Auth handles secure token management for sign-in and social logins.
+
+• Offline & Caching
+
+*   Maps, resort details, and itinerary data are cached locally so you can access them without a connection.
+*   We limit the size of offline map tiles to avoid filling up your phone.
+
+• Performance Optimizations
+
+*   Route calculations and map renders aim to complete in under 2 seconds on supported devices (iOS 14+, Android 10+).
+*   We cache API responses (routes and resort data) to minimize repeated network calls and respect rate limits.
+
+**Result:**\
+Fast load times, minimal data usage, robust offline support, and encrypted data protect your privacy.
+
+## 6. Conclusion and Overall Tech Stack Summary
+
+By combining React Native, Supabase, trusted map and calendar APIs, AI services, and solid deployment practices, RoamEasy delivers:
+
+• A single, accessible app on both iOS and Android\
+• Smart, preference-driven route planning\
+• Curated resort suggestions that match your vehicle and scenery tastes\
+• Offline access and local reminders for worry-free travel\
+• Easy calendar export and clean itinerary sharing\
+• A reliable freemium model with simple subscription management
+
+This tech stack was chosen to meet retirees’, snowbirds’, and family road-trippers’ needs for clarity, reliability, and simplicity—so every mile of your RV adventure feels as relaxing as the destination.

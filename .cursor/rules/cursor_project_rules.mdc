@@ -1,0 +1,147 @@
+---
+description: Apply these rules when making changes to the project
+globs:
+alwaysApply: true
+---
+
+Update this rule if user requested changes to the project requirement, etc.
+## Project Overview
+
+*   **Type:** cursor_project_rules
+*   **Description:** I want to build a mobile app for RV travelers and retirees to plan a full multi-stop route and get smart suggestions for the best resorts at each stop, based on their driving limits and scenery preferences. In the MVP, users manually book their stays but have everything planned and organized beautifully in one place.
+*   **Primary Goal:** Generate accurate, preference-driven routes with clear daily legs, provide filtered resort suggestions, and deliver a single, shareable itinerary that syncs to Google Calendar or iCal, fully available offline once saved.
+
+## Project Structure
+
+### Framework-Specific Routing
+
+*   **Directory Rules:**
+
+    *   React Native + React Navigation (v6): `/src/navigation/` holds `AppNavigator.tsx`, `AuthNavigator.tsx`, `MainTabNavigator.tsx`. Screens live under `/src/screens/[ScreenName]/index.tsx` and are registered in navigators.
+    *   Example 1: `/src/navigation/AppNavigator.tsx` → Defines root stack (Auth vs. Main).
+    *   Example 2: `/src/navigation/AuthNavigator.tsx` → Email/password + social login + guest flow screens.
+    *   Example 3: `/src/navigation/MainTabNavigator.tsx` → Home, TripPlanner, OfflineTrips, Settings tabs.
+
+### Core Directories
+
+*   **Versioned Structure:**
+
+    *   `src/screens`: React Native screen components using TSX.
+    *   `src/components`: Reusable functional UI components (buttons, cards, maps).
+    *   `src/hooks`: Custom React hooks (e.g., `useRoutePlanner`, `useOfflineCache`).
+    *   `src/services`: API wrappers (Supabase, Google Maps, Calendar, ElevenLabs).
+    *   `src/storage`: Offline caching layer using AsyncStorage or SQLite.
+    *   `src/navigation`: Navigation config with React Navigation v6.
+    *   `src/context`: React Context providers (AuthContext, ThemeContext).
+    *   `src/assets`: Static assets (images, fonts, icons).
+    *   `src/utils`: Utility functions (date formatting, unit conversion).
+    *   `src/constants`: Enums, types, config values (API keys, endpoints).
+
+### Key Files
+
+*   **Stack-Versioned Patterns:**
+
+    *   `src/navigation/AppNavigator.tsx`: Root stack navigator wiring Auth vs. Main flows.
+    *   `src/screens/Onboarding/index.tsx`: Onboarding & guest-mode logic.
+    *   `src/screens/TripPlanner/index.tsx`: Interactive map & route planning UI.
+    *   `src/screens/ResortSuggestions/index.tsx`: Stop-by-stop resort cards.
+    *   `src/screens/ItineraryReview/index.tsx`: Editable itinerary and notes.
+    *   `src/services/supabaseClient.ts`: Supabase initialization (Auth, Database).
+    *   `src/services/mapsService.ts`: Google Maps & OpenRouteService API wrapper.
+    *   `src/services/calendarService.ts`: Google Calendar, iCloud, iCal integration.
+    *   `src/services/notificationService.ts`: Local notification scheduling.
+    *   `src/storage/cache.ts`: AsyncStorage wrapper for trips and map tiles.
+
+## Tech Stack Rules
+
+*   **Version Enforcement:**
+
+    *   react-native@0.71.x: Must use React Native CLI with TypeScript template; functional components and hooks only.
+    *   @react-navigation/native@6.x + @react-navigation/stack@6.x: No legacy navigation libraries.
+    *   typescript@5.x: `strict` mode enabled; no implicit any.
+    *   supabase-js@2.x: Use new modular imports; enforce Row Level Security on all queries.
+    *   @react-native-async-storage/async-storage@1.x: Used for all offline caching; wrap in feature-specific keys.
+    *   react-native-push-notification@8.x: For local reminders; request permissions on first run.
+    *   cursor: Use Cursor AI for code completions tied to project docs; integrate in VS Code.
+    *   replit: Use Replit for quick prototyping; mirror folder structure.
+
+## PRD Compliance
+
+*   **Non-Negotiable:**
+
+    *   "Work seamlessly offline once a trip is saved.": All itinerary data, map tiles, resort details, and notes must be cached on-device and accessible without connectivity.
+    *   "Export to Google Calendar, Apple iCloud Calendar, or iCal as event series.": Must implement calendar export via respective APIs, with toggles for site numbers and times.
+    *   "Guest mode browsing; account signup via email/password, Apple, Google, or social login.": Block saving trips until registration; allow planning in guest mode.
+    *   "Freemium subscription: up to X free trips, paid tiers unlock more routes.": Enforce free-trip limit and upgrade paywall via Stripe or equivalent.
+    *   "Accessibility: large fonts, high-contrast mode, voiceover support.": Implement with React Native Accessibility API and ElevenLabs Conversation API for voiceover prompts.
+    *   "Targeting iOS 14+ and Android 10+.": Ensure compatibility and test on minimum OS versions.
+
+## App Flow Integration
+
+*   **Stack-Aligned Flow:**
+
+    *   Onboarding & Auth Flow → `src/navigation/AuthNavigator.tsx` uses `src/screens/SignIn`, `src/screens/SignUp`, `src/screens/GuestHome`.
+    *   Main App Flow → `src/navigation/MainTabNavigator.tsx` routes to `Home`, `TripPlanner`, `OfflineTrips`, `Settings` screens.
+    *   Trip Planning → `src/screens/TripPlanner/index.tsx` invokes `mapsService.planRoute()` and custom `useRoutePlanner` hook.
+    *   Resort Suggestions → `src/screens/ResortSuggestions/index.tsx` calls `mapsService.getStops()` + `useResortRecommendations`.
+    *   Itinerary Review → `src/screens/ItineraryReview/index.tsx` integrates `cache.saveTrip()`, `calendarService.exportTrip()`.
+    *   Offline Access → `cache.ts` auto-subscribes to save maps and resorts on trip save; shows in `OfflineTrips`.
+    *   Notifications → `notificationService.scheduleDepartureReminder()` uses prep time + check-out deadlines.
+
+## Best Practices
+
+*   React Native
+    *   Prefer functional components and React Hooks; avoid class components.
+    *   Use React Native StyleSheet or styled-components with theming.
+    *   Optimize images with `react-native-asset` and use vector icons.
+    *   Avoid anonymous functions in JSX; memoize handlers.
+*   TypeScript
+    *   Enable `strict` mode; avoid `any` by using generics or utility types.
+    *   Explicitly type component props and return types.
+    *   Organize types in `src/constants/types.ts`.
+*   Supabase Auth & Database
+    *   Centralize client in `services/supabaseClient.ts`; wrap calls in custom hooks (`useAuth`, `useTrips`).
+    *   Use RLS policies; validate inputs client-side and server-side.
+*   Google Maps & OpenRouteService
+    *   Abstract API calls; handle rate limits with caching and exponential backoff.
+    *   Debounce user inputs on location search.
+*   Calendar Integration
+    *   Standardize event payloads; handle timezone conversions consistently.
+    *   Request calendar permissions gracefully and fallback to iCal export.
+*   Offline Storage
+    *   Prefix AsyncStorage keys by feature (e.g., `trip_<id>`).
+    *   Validate data shapes on retrieval; migrate storage schema safely.
+*   Notifications
+    *   Request permissions on first launch; explain benefit to users.
+    *   Use `notificationService` abstraction; test edge cases (reboot, time changes).
+*   Cursor & Replit
+    *   Leverage Cursor snippets aligned with project rules; record usage in metrics.
+    *   Mirror local repo structure in Replit for consistent collaboration.
+
+## Rules
+
+*   Derive folder/file patterns directly from the tech stack versions.
+*   If React Navigation v6: enforce `src/navigation` structure; no legacy imports.
+*   Enforce TypeScript strict mode; do not commit `.js` screen files.
+*   Always separate API service modules (`services/`) from UI (`screens/`).
+*   Never overwrite offline cache on trip edits; merge updates intelligently.
+*   Block saving trips in guest mode; prompt registration for persistence.
+
+## Rules Metrics
+
+Before starting the project development, create a metrics file in the root of the project called `cursor_metrics.md`.
+
+### Instructions:
+
+*   Each time a cursor rule is used as context, update `cursor_metrics.md`.
+
+*   Use the following format for `cursor_metrics.md`:
+
+    # Rules Metrics
+
+    ## Usage
+    The number of times rules is used as context
+
+    *   cursor_project_rules.mdc: 5
+    *   react_navigation_rules.mdc: 3
+    *   offline_caching_rules.mdc: 2

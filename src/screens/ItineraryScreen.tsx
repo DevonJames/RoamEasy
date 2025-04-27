@@ -1,0 +1,579 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  FlatList, 
+  TouchableOpacity, 
+  TextInput,
+  SafeAreaView,
+  Share,
+  ActivityIndicator,
+  Alert
+} from 'react-native';
+import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import useTrips, { Trip, TripStop } from '../hooks/useTrips';
+import CalendarService from '../services/CalendarService';
+import { format } from 'date-fns';
+
+// Define the navigation types
+type RootStackParamList = {
+  Home: undefined;
+  RoutePlanner: undefined;
+  ItineraryScreen: { tripId: string };
+  ResortDetailsScreen: { tripId: string, stopId: string };
+  Settings: undefined;
+  OfflineTrips: undefined;
+};
+
+type ItineraryScreenRouteProp = RouteProp<RootStackParamList, 'ItineraryScreen'>;
+type ItineraryScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
+
+const ItineraryScreen = () => {
+  const route = useRoute<ItineraryScreenRouteProp>();
+  const navigation = useNavigation<ItineraryScreenNavigationProp>();
+  const { tripId } = route.params;
+  
+  const { getTrip, updateTripStop, reorderTripStops, exportTripToCalendar, isLoading, error, currentTrip } = useTrips();
+  
+  const [editingNotes, setEditingNotes] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState('');
+
+  useEffect(() => {
+    // Load the trip details when component mounts
+    if (tripId) {
+      getTrip(tripId);
+    }
+  }, [tripId]);
+
+  // Handle note editing
+  const startEditingNotes = (stopId: string, currentNotes: string = '') => {
+    setEditingNotes(stopId);
+    setNoteText(currentNotes);
+  };
+
+  // Save edited notes
+  const saveNotes = async (stopId: string) => {
+    if (!currentTrip) return;
+    
+    try {
+      await updateTripStop(currentTrip.id, stopId, { notes: noteText });
+      setEditingNotes(null);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to save notes. Please try again.');
+    }
+  };
+
+  // Swap the position of two stops
+  const moveStop = async (fromIndex: number, toIndex: number) => {
+    if (!currentTrip?.stops || toIndex < 0 || toIndex >= currentTrip.stops.length) return;
+    
+    try {
+      const newOrder = [...currentTrip.stops].map((stop, i) => ({
+        id: stop.id,
+        stop_order: i === fromIndex ? toIndex : 
+                    i === toIndex ? fromIndex : i
+      }));
+      
+      await reorderTripStops(currentTrip.id, newOrder);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to reorder stops. Please try again.');
+    }
+  };
+
+  // Share the itinerary via email or other share options
+  const shareItinerary = async () => {
+    if (!currentTrip || !currentTrip.stops) return;
+    
+    try {
+      const formattedItinerary = currentTrip.stops
+        .sort((a, b) => a.stop_order - b.stop_order)
+        .map((stop, index) => {
+          const checkInDate = new Date(stop.check_in);
+          const checkOutDate = new Date(stop.check_out);
+          const resort = stop.resort || { name: 'TBD', address: 'Location TBD' };
+          
+          // Check if resort has phone property
+          const hasPhone = resort && 'phone' in resort && resort.phone;
+          
+          return (
+            `Day ${index + 1}: ${resort.name}\n` +
+            `Date: ${format(checkInDate, 'MMM d, yyyy')}\n` +
+            `Location: ${resort.address}\n` +
+            `Check-in: ${format(checkInDate, 'h:mm a')} | Check-out: ${format(checkOutDate, 'h:mm a')}\n` +
+            `${stop.booking_info?.site_number ? `Site #: ${stop.booking_info.site_number}\n` : ''}` +
+            `${hasPhone ? `Phone: ${resort.phone}\n` : ''}` +
+            `${stop.notes ? `Notes: ${stop.notes}\n` : ''}` +
+            '-------------------'
+          );
+        })
+        .join('\n\n');
+
+      await Share.share({
+        title: `${currentTrip.name} Itinerary`,
+        message: `RoamEasy Trip: ${currentTrip.name}\n\n${formattedItinerary}`,
+      });
+    } catch (error) {
+      console.error('Error sharing itinerary:', error);
+      Alert.alert('Error', 'Failed to share itinerary. Please try again.');
+    }
+  };
+
+  // Export to calendar
+  const exportToCalendar = async (calendarType: 'google' | 'icloud' | 'ical') => {
+    if (!currentTrip) return;
+    
+    try {
+      const result = await exportTripToCalendar(currentTrip.id, calendarType);
+      
+      if (result.success) {
+        Alert.alert('Success', `Itinerary exported to ${calendarType} calendar successfully.`);
+      } else {
+        throw new Error(result.error?.message || 'Unknown error');
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      Alert.alert('Export Failed', `Could not export to calendar: ${errorMsg}`);
+    }
+  };
+
+  const showExportOptions = () => {
+    Alert.alert(
+      'Export Calendar',
+      'Choose a calendar type',
+      [
+        { text: 'Google Calendar', onPress: () => exportToCalendar('google') },
+        { text: 'Apple Calendar', onPress: () => exportToCalendar('icloud') },
+        { text: 'Export iCal File', onPress: () => exportToCalendar('ical') },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  };
+
+  // Navigation to resort details
+  const navigateToResortDetails = (stopId: string) => {
+    if (!currentTrip) return;
+    navigation.navigate('ResortDetailsScreen', { tripId: currentTrip.id, stopId });
+  };
+
+  // Render the header with action buttons
+  const renderHeader = () => (
+    <View style={styles.header}>
+      <Text style={styles.headerTitle}>{currentTrip?.name || 'Trip Itinerary'}</Text>
+      <View style={styles.actionButtons}>
+        <TouchableOpacity 
+          style={[styles.actionButton, styles.shareButton]} 
+          onPress={shareItinerary}
+          accessible={true}
+          accessibilityLabel="Share itinerary"
+        >
+          <Text style={styles.actionButtonText}>Share</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.actionButton, styles.calendarButton]} 
+          onPress={showExportOptions}
+          accessible={true}
+          accessibilityLabel="Export to calendar"
+        >
+          <Text style={styles.actionButtonText}>Export to Calendar</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // Render a stop item
+  const renderStopItem = ({ item, index }: { item: TripStop; index: number }) => {
+    const checkInDate = new Date(item.check_in);
+    const checkOutDate = new Date(item.check_out);
+    const resort = item.resort || { name: 'Select a Resort', address: 'Tap to choose a resort' };
+    
+    // Safely check if phone exists on resort
+    const resortHasPhone = resort && 'phone' in resort && resort.phone;
+    
+    return (
+      <View style={styles.stopItem}>
+        <View style={styles.dayBadge}>
+          <Text style={styles.dayNumber}>{index + 1}</Text>
+        </View>
+        
+        <View style={styles.stopDetails}>
+          <TouchableOpacity 
+            style={styles.resortSelector}
+            onPress={() => navigateToResortDetails(item.id)}
+            accessible={true}
+            accessibilityLabel={`Select resort for day ${index + 1}`}
+          >
+            <Text style={styles.resortName}>{resort.name}</Text>
+            <Text style={styles.location}>{resort.address}</Text>
+            {!item.resort_id && (
+              <Text style={styles.selectResortPrompt}>Tap to select a resort</Text>
+            )}
+          </TouchableOpacity>
+          
+          <View style={styles.checkTimes}>
+            <Text style={styles.checkTimeLabel}>
+              Check-in: {format(checkInDate, 'MMM d, h:mm a')}
+            </Text>
+            <Text style={styles.checkTimeLabel}>
+              Check-out: {format(checkOutDate, 'MMM d, h:mm a')}
+            </Text>
+          </View>
+          
+          {item.booking_info?.site_number && (
+            <Text style={styles.siteNumber}>Site #: {item.booking_info.site_number}</Text>
+          )}
+          
+          {resortHasPhone && (
+            <Text style={styles.phoneNumber}>Phone: {resort.phone}</Text>
+          )}
+          
+          <View style={styles.notesContainer}>
+            {editingNotes === item.id ? (
+              <View style={styles.notesEditContainer}>
+                <TextInput
+                  style={styles.notesInput}
+                  value={noteText}
+                  onChangeText={setNoteText}
+                  placeholder="Add notes about this stop..."
+                  multiline
+                  accessible={true}
+                  accessibilityLabel="Edit notes for this stop"
+                />
+                <TouchableOpacity
+                  style={styles.saveButton}
+                  onPress={() => saveNotes(item.id)}
+                  accessible={true}
+                  accessibilityLabel="Save notes"
+                >
+                  <Text style={styles.saveButtonText}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.notesDisplay}
+                onPress={() => startEditingNotes(item.id, item.notes)}
+                accessible={true}
+                accessibilityLabel={item.notes ? "Edit notes" : "Add notes for this stop"}
+              >
+                <Text style={styles.notesLabel}>Notes:</Text>
+                <Text style={styles.notesText}>
+                  {item.notes || 'Tap to add notes...'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          <View style={styles.reorderButtons}>
+            {index > 0 && (
+              <TouchableOpacity
+                style={[styles.reorderButton, styles.moveUpButton]}
+                onPress={() => moveStop(index, index - 1)}
+                accessible={true}
+                accessibilityLabel={`Move day ${index + 1} up in itinerary`}
+              >
+                <Text style={styles.reorderButtonText}>↑</Text>
+              </TouchableOpacity>
+            )}
+            {index < (currentTrip?.stops?.length || 0) - 1 && (
+              <TouchableOpacity
+                style={[styles.reorderButton, styles.moveDownButton]}
+                onPress={() => moveStop(index, index + 1)}
+                accessible={true}
+                accessibilityLabel={`Move day ${index + 1} down in itinerary`}
+              >
+                <Text style={styles.reorderButtonText}>↓</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        {renderHeader()}
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2E7D32" />
+          <Text style={styles.loadingText}>Loading your itinerary...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        {renderHeader()}
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Error loading itinerary: {error.message}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton}
+            onPress={() => getTrip(tripId)}
+            accessible={true}
+            accessibilityLabel="Retry loading trip"
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Empty stops state
+  if (!currentTrip?.stops || currentTrip.stops.length === 0) {
+    return (
+      <SafeAreaView style={styles.container}>
+        {renderHeader()}
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No stops found in this itinerary.</Text>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('RoutePlanner')}
+            accessible={true}
+            accessibilityLabel="Plan a new route"
+          >
+            <Text style={styles.actionButtonText}>Plan a New Route</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {renderHeader()}
+      <FlatList
+        data={currentTrip.stops.sort((a, b) => a.stop_order - b.stop_order)}
+        keyExtractor={item => item.id}
+        renderItem={renderStopItem}
+        contentContainerStyle={styles.listContent}
+      />
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#FFF8E1',
+  },
+  header: {
+    padding: 16,
+    backgroundColor: '#2E7D32',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 12,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  actionButton: {
+    backgroundColor: '#FF7043',
+    borderRadius: 8,
+    padding: 12,
+    flex: 1,
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  shareButton: {
+    backgroundColor: '#42A5F5',
+  },
+  calendarButton: {
+    backgroundColor: '#FF7043',
+  },
+  actionButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  listContent: {
+    padding: 16,
+  },
+  stopItem: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    borderRadius: 8,
+    marginBottom: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  dayBadge: {
+    width: 40,
+    backgroundColor: '#2E7D32',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dayNumber: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  stopDetails: {
+    flex: 1,
+    padding: 12,
+  },
+  resortSelector: {
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  resortName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#37474F',
+    marginBottom: 4,
+  },
+  location: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  selectResortPrompt: {
+    fontSize: 14,
+    color: '#2E7D32',
+    fontStyle: 'italic',
+  },
+  checkTimes: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  checkTimeLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  siteNumber: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  phoneNumber: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  notesContainer: {
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    paddingTop: 8,
+  },
+  notesDisplay: {
+    flexDirection: 'column',
+  },
+  notesLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#37474F',
+    marginBottom: 4,
+  },
+  notesText: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+  notesEditContainer: {
+    marginTop: 4,
+  },
+  notesInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 4,
+    padding: 8,
+    minHeight: 80,
+    marginBottom: 8,
+  },
+  saveButton: {
+    backgroundColor: '#2E7D32',
+    borderRadius: 4,
+    padding: 8,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  reorderButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 8,
+  },
+  reorderButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  moveUpButton: {
+    backgroundColor: '#42A5F5',
+  },
+  moveDownButton: {
+    backgroundColor: '#42A5F5',
+  },
+  reorderButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#37474F',
+    marginTop: 16,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#d32f2f',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: '#2E7D32',
+    borderRadius: 4,
+    padding: 8,
+    paddingHorizontal: 16,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+});
+
+export default ItineraryScreen; 

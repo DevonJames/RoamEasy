@@ -1,0 +1,93 @@
+---
+description: Apply these rules when making changes to the project
+globs:
+alwaysApply: true
+---
+
+Update this rule if user requested changes to the project requirement, etc.
+# Implementation plan
+
+## Phase 1: Environment Setup
+
+1.  **Prevalidation**: In the project root, check for `package.json` or `ios/` & `android/` folders; if present, abort init to avoid redundancy. (Project Requirements Document: Core Features)
+2.  **Check Node.js**: Run `node -v` and verify it returns v20.2.1. (Tech Stack Document: Core Tools)
+3.  **Install Node.js v20.2.1**: If step 2 fails, install from <https://nodejs.org/dist/v20.2.1/> and validate again. (Tech Stack Document: Core Tools)
+4.  **Check Yarn**: Run `yarn -v` and verify Yarn v1.22.x is installed; if not, run `npm install --global yarn@1.22.19`. (Tech Stack Document: Core Tools)
+5.  **Initialize Git**: If `.git` folder is missing, run `git init && git add . && git commit -m "chore: initial commit"`. (Project Requirements Document: Process)
+6.  **Create Cursor metrics file**: In project root, create `cursor_metrics.md` and reference `cursor_project_rules.mdc` for usage. (Development Tools: Cursor)
+7.  **Setup .cursor directory**: If missing, run `mkdir .cursor` and then `touch .cursor/mcp.json`. (Development Tools: Cursor)
+8.  **Ignore MCP config**: Append `.cursor/mcp.json` to `.gitignore`. (Development Tools: Cursor)
+9.  **Configure Supabase MCP**: In `.cursor/mcp.json`, add:
+
+`// macOS { "mcpServers": { "supabase": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-postgres", "<connection-string>"] } }} // Windows { "mcpServers": { "supabase": { "command": "cmd", "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-postgres", "<connection-string>"] } }} `(Tech Stack Document: Backend)
+
+1.  **Obtain Supabase connection string**: Visit <https://supabase.com/docs/guides/getting-started/mcp#connect-to-supabase-using-mcp> and paste your `<connection-string>` into the JSON above. (Tech Stack Document: Backend)
+2.  **Verify MCP connection**: In Cursor’s Settings → MCP you should see a green “active” status next to “supabase.” (Development Tools: Cursor)
+
+## Phase 2: Frontend Development
+
+1.  **Initialize React Native TS project**: Run:
+
+`npx react-native init RoamEasy --template react-native-template-typescript --npm `(Tech Stack Document: Mobile)
+
+1.  **Validation**: Confirm `package.json` has `react-native` and `typescript` entries. (Tech Stack Document: Mobile)
+2.  **Create environment file**: At project root, add `.env` with keys:
+
+`GOOGLE_MAPS_API_KEY= OPENAI_API_KEY= SUPABASE_URL= SUPABASE_ANON_KEY= `Then add `.env` to `.gitignore`. (Tech Stack Document: Backend)
+
+1.  **Install navigation & core libs**: Run:
+
+`yarn add @react-navigation/native@6.1.6 @react-navigation/native-stack@6.9.12 yarn add react-native-async-storage@1.17.11 react-native-sqlite-storage@5.0.0 yarn add @react-native-community/netinfo@8.2.0 react-native-push-notification@8.1.1 axios@1.3.4 yarn add react-native-maps@0.32.2 `(Tech Stack Document: Mobile)
+
+1.  **Validation**: Run `npx pod-install ios` and then `yarn react-native run-ios` to confirm the app boots. (Tech Stack Document: Mobile)
+2.  **Setup navigation container**: Create `/src/navigation/AppNavigator.tsx` with React Navigation boilerplate. (Application Flow)
+3.  **Home Screen skeleton**: Create `/src/screens/HomeScreen.tsx` with placeholder header “RoamEasy” and bottom tab navigation. (Application Flow)
+4.  **Route Planner UI**: Create `/src/screens/RoutePlannerScreen.tsx` with inputs for start/end location, max driving time selector, and scenery preference dropdown. (PRD Section: Smart Route Planner)
+5.  **Itinerary Screen**: Create `/src/screens/ItineraryScreen.tsx` to list saved stops with reorder handles. (PRD Section: Trip Itinerary Management)
+6.  **Resort Details Screen**: Create `/src/screens/ResortDetailsScreen.tsx` showing photo, rates, rating, phone, and booking link button. (PRD Section: Resort Suggestions)
+7.  **Offline service**: Create `/src/services/OfflineService.ts` w/ methods `cacheMapTiles()`, `cacheResortData()`, and `getCachedItinerary()`. (PRD Section: Offline Access)
+8.  **Maps service**: Create `/src/services/MapsService.ts` using Axios to call Google Maps Directions API and OpenRouteService if fallback. (PRD Section: Smart Route Planner)
+9.  **AI service**: Create `/src/services/OpenAIService.ts` with function `refineStops(prompt)` to call GPT-4-Turbo. (PRD Section: Smart Route Planner)
+10. **Notification service**: Create `/src/services/NotificationService.ts` registering push channels and scheduling departure reminders. (PRD Section: Notifications)
+11. **Calendar service**: Create `/src/services/CalendarService.ts` with export functions for Google Calendar, iCloud, and iCal. (PRD Section: Calendar Export)
+12. **Accessibility**: In each screen, add large tap targets, high-contrast color tokens (greens, oranges, blues), and call ElevenLabs Conversation API in `AccessibilityService.ts` for voiceover. (PRD Section: Accessibility)
+13. **Validation**: Run `yarn lint` and `yarn test` (set up Jest later) and confirm zero errors in `/src` folder. (Tech Stack Document: Core Tools)
+
+## Phase 3: Backend Development
+
+1.  **Initialize Supabase project**: In Supabase Console, create a new project in `us-east-1`; note `project URL` & `anon key`. (Tech Stack Document: Backend)
+2.  **Define Postgres schema**: Create `supabase/schema.sql` with:
+
+`-- users (RLS enabled) create table users (id uuid primary key, email text unique, created_at timestamp default now()); -- trips create table trips (id uuid primary key, user_id uuid references users(id), name text, created_at timestamp default now()); -- stops create table stops (id uuid primary key, trip_id uuid references trips(id), order smallint, lat numeric, lng numeric, notes text); -- resorts create table resorts (id uuid primary key, stop_id uuid references stops(id), name text, rating numeric, cost_per_night numeric, amenities jsonb, site_number text); `(Tech Stack Document: Backend)
+
+1.  **Create tables via MCP**: Run:
+
+`npx @modelcontextprotocol/server-postgres "<connection-string>" < supabase/schema.sql `(Tech Stack Document: Backend)
+
+1.  **Validation**: Run `npx @modelcontextprotocol/server-postgres "<connection-string>" --list-tables` and confirm tables exist. (Tech Stack Document: Backend)
+2.  **Configure Auth providers**: In Supabase Console → Auth → Settings → External OAuth, enable Google and Apple with client IDs. (Q&A: Authentication)
+3.  **Enable RLS**: In Supabase SQL Editor, run `alter table trips enable row level security;` and add a policy `using (auth.uid() = user_id);`. (Tech Stack Document: Security)
+4.  **Install Supabase client**: In frontend, run `yarn add @supabase/supabase-js@2.8.0`. (Tech Stack Document: Backend)
+5.  **Supabase service**: Create `/src/services/SupabaseService.ts` to init `createClient(SUPABASE_URL, SUPABASE_ANON_KEY)` and export auth & db methods. (Tech Stack Document: Backend)
+6.  **Validation**: In `/src/screens/LoginScreen.tsx`, call `supabase.auth.signInWithPassword()` and verify successful login. (Q&A: Authentication)
+
+## Phase 4: Integration
+
+1.  **Route planning flow**: In `RoutePlannerScreen.tsx`, call `MapsService.getRoute()` then `OpenAIService.refineStops()`; display results in `ItineraryScreen`. (Application Flow)
+2.  **Resort suggestions**: For each stop, call `OpenAIService` to fetch resorts, cache via `OfflineService`, then render in `ResortDetailsScreen.tsx`. (PRD Section: Resort Suggestions)
+3.  **Trip CRUD**: Wire up `SupabaseService` to save/retrieve trips and stops; on save, write to Supabase and Local SQLite. (PRD Section: Trip Itinerary Management)
+4.  **Offline sync**: Detect offline via NetInfo; read/write only to SQLite, then sync to Supabase on reconnect. (PRD Section: Offline Access)
+5.  **Calendar export**: From `ItineraryScreen`, invoke `CalendarService.exportToCalendar()` and handle user consent. (PRD Section: Calendar Export)
+6.  **Sharing feature**: Add `Share` button in `ItineraryScreen` that generates a simplified PDF/HTML itinerary and invokes React Native Share API. (PRD Section: Sharing)
+7.  **Validation**: Simulate offline in emulator and confirm itinerary and maps display correctly; test share and calendar export. (PRD Section: Offline Access)
+
+## Phase 5: Deployment
+
+1.  **CI pipeline**: Create `.github/workflows/ci.yml` with jobs for `build-ios` (macos-latest) and `build-android` (ubuntu-latest) that run `yarn install`, `yarn lint`, `yarn test`, and build commands. (Tech Stack Document: Deployment)
+2.  **Fastlane for iOS**: In `ios/fastlane/Fastfile`, add lanes `beta` and `release` using `match` for code signing and `gym` to build `.ipa`. (Tech Stack Document: Deployment)
+3.  **Fastlane for Android**: In `android/fastlane/Fastfile`, add lanes `beta` and `release` using `gradle` action to build `.apk`/`.aab`. (Tech Stack Document: Deployment)
+4.  **App Store setup**: Register bundle ID `com.yourcompany.roameasy` in Apple Developer, configure TestFlight in App Store Connect. (PRD Section: Release Plan)
+5.  **Play Store setup**: Create app in Google Play Console, set application ID `com.yourcompany.roameasy`, upload Android App Bundle. (PRD Section: Release Plan)
+6.  **Validation**: After CI artifacts are generated, trigger Fastlane lanes and confirm builds upload to TestFlight and Google Play internal tracks. (PRD Section: Release Plan)
+
+*All steps reference the provided documents and enforce exact versions and paths as specified.*
