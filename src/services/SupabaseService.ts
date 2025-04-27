@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../utils/environment';
 
 // Types
 export interface User {
@@ -63,14 +64,11 @@ class SupabaseService {
   private static instance: SupabaseService;
 
   private constructor() {
-    const supabaseUrl = process.env.SUPABASE_URL || '';
-    const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
-    
-    if (!supabaseUrl || !supabaseKey) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
       console.error('Missing Supabase environment variables');
     }
     
-    this.supabase = createClient(supabaseUrl, supabaseKey);
+    this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   }
 
   public static getInstance(): SupabaseService {

@@ -1,10 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, Session, User } from '@supabase/supabase-js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@env';
 
-// Use environment variables in production. For now, using placeholder values
-const supabaseUrl = 'https://your-supabase-url.supabase.co';
-const supabaseAnonKey = 'your-anon-key';
+// Use environment variables
+const supabaseUrl = SUPABASE_URL || '';
+const supabaseAnonKey = SUPABASE_ANON_KEY || '';
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase environment variables');
+}
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -18,13 +23,29 @@ const useAuth = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isGuest, setIsGuest] = useState<boolean>(false);
+  // TEMPORARY FOR TESTING: Set isGuest to true by default
+  const [isGuest, setIsGuest] = useState<boolean>(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   // Initialize auth state
   useEffect(() => {
     const initAuth = async () => {
       try {
+        // TEMPORARY FOR TESTING: Short-circuit and set guest mode
+        setIsLoading(false);
+        setIsGuest(true);
+        // Add a placeholder user for testing
+        setUser({
+          id: 'guest-user-id',
+          email: 'guest@example.com',
+          fullName: 'Guest User'
+        });
+        await AsyncStorage.setItem('guest_mode', 'true');
+        console.log('⚠️ TESTING MODE: Automatically using guest mode');
+        return;
+
+        // Original authentication code (currently bypassed)
+        /*
         setIsLoading(true);
         
         // Check for existing session
@@ -45,6 +66,7 @@ const useAuth = () => {
             setIsGuest(true);
           }
         }
+        */
       } catch (error) {
         console.error('Auth initialization error:', error);
       } finally {
@@ -54,7 +76,13 @@ const useAuth = () => {
 
     initAuth();
 
-    // Subscribe to auth changes
+    // Skip auth subscription for testing
+    return () => {
+      // No cleanup needed in test mode
+    };
+
+    /*
+    // Original auth subscription (currently bypassed)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (session) {
@@ -78,6 +106,7 @@ const useAuth = () => {
     return () => {
       subscription.unsubscribe();
     };
+    */
   }, []);
 
   // Sign in with email/password

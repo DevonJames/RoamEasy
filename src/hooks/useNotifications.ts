@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import NotificationService from '../services/NotificationService';
-import { useAuth } from './useAuth';
+import useAuth from './useAuth';
 
 export interface Notification {
   id: string;

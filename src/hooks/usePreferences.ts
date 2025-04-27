@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import SupabaseService from '../services/SupabaseService';
 import OfflineService from '../services/OfflineService';
 import { useNetInfo } from '@react-native-community/netinfo';
-import { useAuth } from './useAuth';
+import useAuth from './useAuth';
 
 export interface SceneryPreferences {
   coast: number; // 0-10 preference weight

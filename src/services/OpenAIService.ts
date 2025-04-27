@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { Coordinate } from './MapsService';
+import { OPENAI_API_KEY } from '../utils/environment';
+import { Coordinates } from './MapsService';
 
 // Types
 export interface SceneryPreference {
@@ -23,7 +24,7 @@ export interface ResortSuggestion {
   name: string;
   location: string;
   address: string;
-  coordinates: Coordinate;
+  coordinates: Coordinates;
   rating: number;
   costPerNight: string;
   distance: string;
@@ -40,7 +41,7 @@ class OpenAIService {
   private apiKey: string;
 
   private constructor() {
-    this.apiKey = process.env.OPENAI_API_KEY || '';
+    this.apiKey = OPENAI_API_KEY || '';
     
     if (!this.apiKey) {
       console.warn('OpenAI API key is missing. AI-driven features will not work.');

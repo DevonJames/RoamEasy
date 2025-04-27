@@ -1,12 +1,12 @@
 import axios from 'axios';
 import { Platform } from 'react-native';
-import Config from 'react-native-config';
+import { GOOGLE_MAPS_API_KEY, OPENROUTE_SERVICE_API_KEY } from '../utils/environment';
 import OfflineService from './OfflineService';
 import { Buffer } from 'buffer';
+import MapsOfflineCache from './MapsOfflineCache';
 
 // Configuration constants
-const GOOGLE_MAPS_API_KEY = Config.GOOGLE_MAPS_API_KEY;
-const ORS_API_KEY = Config.OPENROUTE_SERVICE_API_KEY;
+const ORS_API_KEY = OPENROUTE_SERVICE_API_KEY;
 
 // Endpoints
 const GOOGLE_DIRECTIONS_URL = 'https://maps.googleapis.com/maps/api/directions/json';
@@ -87,7 +87,7 @@ class MapsService {
   async geocodeAddress(address: string): Promise<Location> {
     try {
       // Try to get from cache first
-      const cachedLocation = await OfflineService.getCachedLocation(address);
+      const cachedLocation = await MapsOfflineCache.getCachedLocation(address);
       if (cachedLocation) {
         return cachedLocation;
       }
@@ -114,7 +114,7 @@ class MapsService {
       };
 
       // Cache the result
-      await OfflineService.cacheLocation(address, location);
+      await MapsOfflineCache.cacheLocation(address, location);
 
       return location;
     } catch (error) {
@@ -128,7 +128,7 @@ class MapsService {
     try {
       // Try to get from cache first
       const cacheKey = `${coords.latitude},${coords.longitude}`;
-      const cachedLocation = await OfflineService.getCachedLocation(cacheKey);
+      const cachedLocation = await MapsOfflineCache.getCachedLocation(cacheKey);
       if (cachedLocation) {
         return cachedLocation;
       }
@@ -152,7 +152,7 @@ class MapsService {
       };
 
       // Cache the result
-      await OfflineService.cacheLocation(cacheKey, location);
+      await MapsOfflineCache.cacheLocation(cacheKey, location);
 
       return location;
     } catch (error) {
@@ -258,9 +258,18 @@ class MapsService {
         segments
       };
 
-      // Cache the route
+      // Cache the route for offline use
       const cacheKey = this.generateRouteCacheKey(origin, destination, waypoints);
-      await OfflineService.cacheRoute(cacheKey, result);
+      await MapsOfflineCache.cacheRoute(cacheKey, {
+        route: {
+          totalDistance: result.totalDistance,
+          totalDuration: result.totalDuration,
+          legs: result.legs,
+          overviewPolyline: result.overviewPolyline,
+          waypoints: result.waypoints,
+          segments: result.segments
+        }
+      });
 
       return result;
     } catch (error) {
@@ -372,9 +381,18 @@ class MapsService {
         segments: routeSegments
       };
 
-      // Cache the route
+      // Cache the route for offline use
       const cacheKey = this.generateRouteCacheKey(origin, destination, waypoints);
-      await OfflineService.cacheRoute(cacheKey, result);
+      await MapsOfflineCache.cacheRoute(cacheKey, {
+        route: {
+          totalDistance: result.totalDistance,
+          totalDuration: result.totalDuration,
+          legs: result.legs,
+          overviewPolyline: result.overviewPolyline,
+          waypoints: result.waypoints,
+          segments: result.segments
+        }
+      });
 
       return result;
     } catch (error) {
