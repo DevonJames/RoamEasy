@@ -35,7 +35,7 @@ const ItineraryScreen = () => {
   const navigation = useNavigation<ItineraryScreenNavigationProp>();
   const { tripId } = route.params;
   
-  const { getTrip, updateTripStop, reorderTripStops, exportTripToCalendar, isLoading, error, currentTrip } = useTrips();
+  const { getTrip, updateTripStop, reorderTripStops, exportTripToCalendar, isLoading, error, currentTrip, updateTrip } = useTrips();
   
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
@@ -43,7 +43,33 @@ const ItineraryScreen = () => {
   useEffect(() => {
     // Load the trip details when component mounts
     if (tripId) {
-      getTrip(tripId);
+      console.log('ItineraryScreen: Loading trip with ID:', tripId);
+      getTrip(tripId).then(loadedTrip => {
+        if (loadedTrip) {
+          console.log('ItineraryScreen: Trip loaded:', loadedTrip.id);
+          console.log('ItineraryScreen: Trip has', loadedTrip.stops?.length || 0, 'stops');
+          
+          // Check for the trip_stops field (from Supabase nested query)
+          if (loadedTrip.trip_stops && loadedTrip.trip_stops.length > 0) {
+            console.log('ItineraryScreen: Found trip_stops:', loadedTrip.trip_stops.length);
+            console.log('ItineraryScreen: Trip stops data:', JSON.stringify(loadedTrip.trip_stops, null, 2));
+            
+            // Copy trip_stops to stops if stops is empty
+            if (!loadedTrip.stops || loadedTrip.stops.length === 0) {
+              console.log('ItineraryScreen: Copying trip_stops to stops array');
+              
+              // Update currentTrip in the state to include stops from trip_stops
+              updateTrip(loadedTrip.id, {
+                stops: loadedTrip.trip_stops
+              });
+            }
+          } else {
+            console.log('ItineraryScreen: No trip_stops found in loaded trip');
+          }
+        } else {
+          console.log('ItineraryScreen: No trip loaded');
+        }
+      });
     }
   }, [tripId]);
 
@@ -325,7 +351,8 @@ const ItineraryScreen = () => {
   }
 
   // Empty stops state
-  if (!currentTrip?.stops || currentTrip.stops.length === 0) {
+  if (!currentTrip?.stops && !currentTrip?.trip_stops || 
+      (currentTrip?.stops?.length === 0 && (!currentTrip?.trip_stops || currentTrip?.trip_stops?.length === 0))) {
     return (
       <SafeAreaView style={styles.container}>
         {renderHeader()}
@@ -344,11 +371,15 @@ const ItineraryScreen = () => {
     );
   }
 
+  // Use trip_stops if stops is empty
+  const displayStops = currentTrip?.stops?.length ? currentTrip.stops : 
+    (currentTrip?.trip_stops || []);
+
   return (
     <SafeAreaView style={styles.container}>
       {renderHeader()}
       <FlatList
-        data={currentTrip.stops.sort((a, b) => a.stop_order - b.stop_order)}
+        data={displayStops.sort((a, b) => a.stop_order - b.stop_order)}
         keyExtractor={item => item.id}
         renderItem={renderStopItem}
         contentContainerStyle={styles.listContent}

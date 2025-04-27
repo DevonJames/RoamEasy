@@ -410,6 +410,14 @@ Format your response as a JSON object with an array of suggestions in the follow
         typeof stop.coordinates.longitude === 'number'
       );
       
+      console.log('OpenAIService: Returning validStops:', validStops.length);
+      
+      // IMPORTANT: Make absolutely sure we're not returning an empty array if we have stops
+      if (validStops.length === 0 && stops.length > 0) {
+        console.warn('WARNING: All stops were filtered out due to invalid coordinates. Using original stops.');
+        return { stops: stops, error: null };
+      }
+      
       return { stops: validStops, error: null };
     } catch (error) {
       console.error('Error optimizing route:', error);

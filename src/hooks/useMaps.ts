@@ -65,6 +65,20 @@ export default function useMaps() {
       
       if (stopsError) throw stopsError;
       
+      // IMPORTANT FIX: If we didn't get any stops from the OpenAI service,
+      // generate some basic ones from the route waypoints
+      let finalStops = stops || [];
+      
+      if (!finalStops || finalStops.length === 0) {
+        console.warn('No stops returned from OpenAIService, generating from waypoints');
+        
+        // Use waypoints from the route as a fallback
+        if (route.waypoints && route.waypoints.length > 0) {
+          finalStops = route.waypoints;
+          console.log('Generated fallback stops from waypoints:', finalStops.length);
+        }
+      }
+      
       // Skip map tile caching for now - it's causing errors and isn't critical
       // Try {
       //   await OfflineService.cacheMapTiles(stops);
@@ -73,11 +87,13 @@ export default function useMaps() {
       // }
       
       // Filter out any stops that don't have valid latitude and longitude
-      const validStops = stops ? stops.filter(stop => 
+      const validStops = finalStops.filter(stop => 
         stop && 
-        typeof stop.latitude === 'number' && 
-        typeof stop.longitude === 'number'
-      ) : [];
+        typeof stop.coordinates.latitude === 'number' && 
+        typeof stop.coordinates.longitude === 'number'
+      ) || [];
+      
+      console.log('Valid stops from optimizeRoute:', JSON.stringify(validStops, null, 2));
       
       setState(prevState => ({
         ...prevState,
@@ -86,6 +102,7 @@ export default function useMaps() {
         isLoading: false,
       }));
       
+      // IMPORTANT FIX: Always return the valid stops, regardless of whether they came from result.stops
       return { success: true, route, stops: validStops };
     } catch (error) {
       setState(prevState => ({

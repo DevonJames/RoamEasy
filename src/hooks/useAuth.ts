@@ -50,7 +50,7 @@ const useAuth = () => {
         
         // Mock session for testing
         const mockUser = {
-          id: 'test-user-id-123',
+          id: '00000000-0000-4000-8000-000000000000', // Valid UUID format
           email: 'test@example.com',
           app_metadata: { provider: 'email' },
           user_metadata: { full_name: 'Test User' },

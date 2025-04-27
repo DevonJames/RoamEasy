@@ -114,8 +114,9 @@ const RoutePlannerScreen = () => {
   const [error, setError] = useState<string | null>(null);
   const [isStartFocused, setIsStartFocused] = useState(false);
   const [isEndFocused, setIsEndFocused] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const isLoading = prefsLoading || mapsLoading || tripLoading;
+  const isLoadingCombined = prefsLoading || mapsLoading || tripLoading || isLoading;
 
   // Load preferences on mount
   useEffect(() => {
@@ -364,6 +365,43 @@ const RoutePlannerScreen = () => {
         throw new Error(result.error?.message || 'Failed to calculate route');
       }
       
+      // Debug information for route planning
+      console.log('Route planning result:', JSON.stringify(result, null, 2));
+      console.log('Stops received from route planning:', result.stops?.length || 0);
+      
+      // Important fix: If we get stops directly from route planning or from result.stops, use those
+      const planningStops = result.stops || [];
+      console.log('Planning stops before processing:', JSON.stringify(planningStops, null, 2));
+      
+      if (planningStops && planningStops.length > 0) {
+        // Calculate dates for each stop
+        const todayDate = new Date();
+        const recommendedStops = planningStops.map((stop, index) => ({
+          date: new Date(todayDate.getTime() + index * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          location: {
+            latitude: stop.coordinates.latitude,
+            longitude: stop.coordinates.longitude,
+            address: stop.address || `Location near ${stop.coordinates.latitude}, ${stop.coordinates.longitude}`
+          }
+        }));
+        
+        console.log('Created recommendedStops from planning stops:', JSON.stringify(recommendedStops, null, 2));
+        
+        const mockRouteResult: RouteResult = {
+          startCoords: {
+            latitude: startLocationObj.coordinates.latitude,
+            longitude: startLocationObj.coordinates.longitude
+          },
+          endCoords: {
+            latitude: endLocationObj.coordinates.latitude,
+            longitude: endLocationObj.coordinates.longitude
+          },
+          recommendedStops: recommendedStops
+        };
+        
+        return mockRouteResult;
+      }
+      
       // For now, construct a mock RouteResult that matches the interface our app expects
       const mockRouteResult: RouteResult = {
         startCoords: {
@@ -374,16 +412,59 @@ const RoutePlannerScreen = () => {
           latitude: endLocationObj.coordinates.latitude,
           longitude: endLocationObj.coordinates.longitude
         },
-        recommendedStops: result.stops.map(stop => ({
-          date: new Date().toISOString().split('T')[0], // Just use today's date for now
-          location: {
-            latitude: stop.coordinates.latitude,
-            longitude: stop.coordinates.longitude,
-            address: stop.address || `Location near ${stop.coordinates.latitude}, ${stop.coordinates.longitude}`
-          }
-        }))
+        recommendedStops: []
       };
       
+      // IMPORTANT: If we have no stops at this point, manually create some
+      if (mockRouteResult.recommendedStops.length === 0) {
+        console.log('No stops available - manually creating at least two stops');
+        
+        // Start point as first stop
+        const startStop = {
+          date: new Date().toISOString().split('T')[0],
+          location: {
+            latitude: startLocationObj.coordinates.latitude,
+            longitude: startLocationObj.coordinates.longitude,
+            address: startLocation
+          }
+        };
+        
+        // End point as final stop
+        const endStop = {
+          date: new Date(new Date().getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          location: {
+            latitude: endLocationObj.coordinates.latitude,
+            longitude: endLocationObj.coordinates.longitude,
+            address: endLocation
+          }
+        };
+        
+        // For long routes, add a midpoint
+        if (result.route && result.route.totalDistance > 500000) { // > 500 km
+          // Calculate a rough midpoint 
+          const midLat = (startLocationObj.coordinates.latitude + endLocationObj.coordinates.latitude) / 2;
+          const midLng = (startLocationObj.coordinates.longitude + endLocationObj.coordinates.longitude) / 2;
+          
+          const midpointStop = {
+            date: new Date(new Date().getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            location: {
+              latitude: midLat,
+              longitude: midLng,
+              address: `Midpoint between ${startLocation} and ${endLocation}`
+            }
+          };
+          
+          // Add the midpoint and adjust the end date
+          mockRouteResult.recommendedStops = [startStop, midpointStop, endStop];
+          console.log('Created three stops including midpoint');
+        } else {
+          // Just use start and end for shorter routes
+          mockRouteResult.recommendedStops = [startStop, endStop];
+          console.log('Created two stops (start and end only)');
+        }
+      }
+      
+      console.log('Final mockRouteResult:', JSON.stringify(mockRouteResult, null, 2));
       return mockRouteResult;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
@@ -395,10 +476,55 @@ const RoutePlannerScreen = () => {
   const handlePlanRoute = async () => {
     try {
       setError(null);
+      setIsLoading(true);
       const routeResult = await calculateRoute();
 
       if (!routeResult) {
         throw new Error('Failed to calculate route');
+      }
+
+      console.log('Route result with stops:', routeResult.recommendedStops.length);
+      console.log('Creating stop data from recommended stops:', JSON.stringify(routeResult.recommendedStops, null, 2));
+
+      // Map recommended stops to the format expected by createTrip
+      const stops = routeResult.recommendedStops.map((stop, index) => ({
+        location: {
+          latitude: stop.location.latitude,
+          longitude: stop.location.longitude,
+          address: stop.location.address
+        },
+        stop_order: index,
+        check_in: stop.date,
+        check_out: index < routeResult.recommendedStops.length - 1 
+          ? routeResult.recommendedStops[index + 1].date 
+          : new Date(new Date(stop.date).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Next day as default
+        notes: `Location: ${stop.location.address}`,
+        resort_id: '00000000-0000-4000-8000-000000000000' // Default resort ID required by schema
+      }));
+
+      console.log('Final stops being sent with createTrip:', JSON.stringify(stops, null, 2));
+
+      // Debug log all trip data
+      console.log('COMPLETE TRIP DATA BEFORE CREATION:', JSON.stringify({
+        name: tripName,
+        start_location: {
+          address: startLocation,
+          latitude: routeResult.startCoords.latitude,
+          longitude: routeResult.startCoords.longitude
+        },
+        end_location: {
+          address: endLocation,
+          latitude: routeResult.endCoords.latitude,
+          longitude: routeResult.endCoords.longitude
+        },
+        status: 'planned',
+        stops: stops
+      }, null, 2));
+
+      // Verify stops array is valid and non-empty
+      if (!stops || stops.length === 0) {
+        console.warn('WARNING: No stops detected before trip creation!');
+        console.log('Route result had recommendedStops:', routeResult.recommendedStops.length);
       }
 
       // Create the trip with the calculated route
@@ -415,28 +541,17 @@ const RoutePlannerScreen = () => {
           longitude: routeResult.endCoords.longitude
         },
         status: 'planned',
-        // Map stops to the expected format
-        stops: routeResult.recommendedStops.map((stop, index) => ({
-          location: {
-            latitude: stop.location.latitude,
-            longitude: stop.location.longitude,
-            address: stop.location.address
-          },
-          stop_order: index,
-          check_in: stop.date,
-          check_out: index < routeResult.recommendedStops.length - 1 
-            ? routeResult.recommendedStops[index + 1].date 
-            : new Date(new Date(stop.date).getTime() + 24 * 60 * 60 * 1000).toISOString(), // Next day as default
-          notes: ''
-        }))
+        stops: stops
       });
 
+      setIsLoading(false);
       if (newTrip.success && newTrip.trip) {
-        navigation.navigate('ItineraryScreen', { tripId: newTrip.trip.id });
+        navigation.navigate('Itinerary', { tripId: newTrip.trip.id });
       } else {
         throw new Error(newTrip.error?.message || 'Failed to create trip');
       }
     } catch (err) {
+      setIsLoading(false);
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
       setError(errorMessage);
       Alert.alert('Route Planning Error', errorMessage);
@@ -519,7 +634,7 @@ const RoutePlannerScreen = () => {
             </View>
           )}
 
-          {isLoading ? (
+          {isLoadingCombined ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={COLORS.primary} />
               <Text style={styles.loadingText}>Planning your perfect route...</Text>

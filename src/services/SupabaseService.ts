@@ -24,8 +24,21 @@ export interface Trip {
   id: string;
   user_id: string;
   name: string;
+  start_location?: {
+    address: string;
+    latitude: number;
+    longitude: number;
+  };
+  end_location?: {
+    address: string;
+    latitude: number;
+    longitude: number;
+  };
+  status?: string;
   created_at: string;
   updated_at: string;
+  stops?: TripStop[];
+  trip_stops?: TripStop[]; // For Supabase nested query results
 }
 
 export interface TripStop {
@@ -247,18 +260,39 @@ class SupabaseService {
 
   async getTripById(tripId: string): Promise<{ trip: Trip | null; error: Error | null }> {
     try {
+      console.log('Fetching trip with ID:', tripId);
+      
+      // Get the trip with its stops
       const { data, error } = await this.supabase
         .from('trips')
-        .select('*')
+        .select(`
+          *,
+          trip_stops (*)
+        `)
         .eq('id', tripId)
         .single();
       
       if (error) {
+        console.error('Error fetching trip:', error);
         throw error;
       }
       
-      return { trip: data as Trip, error: null };
+      if (!data) {
+        console.log('No trip found with ID:', tripId);
+        return { trip: null, error: null };
+      }
+      
+      // Transform the result to match our Trip interface
+      const trip = {
+        ...data,
+        stops: data.trip_stops || []
+      } as Trip;
+      
+      console.log('Trip retrieved successfully with', trip.stops?.length || 0, 'stops');
+      
+      return { trip, error: null };
     } catch (error) {
+      console.error('Error in getTripById:', error);
       return { trip: null, error: error as Error };
     }
   }
@@ -266,8 +300,6 @@ class SupabaseService {
   async createTrip(tripData: any): Promise<{ trip: Trip | null; error: Error | null }> {
     try {
       console.log('Creating trip with data:', JSON.stringify(tripData, null, 2));
-      
-      // Skip the database check - we'll assume tables exist
       
       // Check for required fields
       if (!tripData.user_id) {
@@ -280,42 +312,89 @@ class SupabaseService {
         return { trip: null, error: new Error('Missing required field: name') };
       }
       
-      // Create a minimal version of the trip with only the required fields
-      const minimalTripData = {
-        user_id: tripData.user_id,
-        name: tripData.name
-      };
+      // Save the stops array
+      const stops = tripData.stops || [];
+      console.log(`Trip has ${stops.length} stops for creation`);
       
-      console.log('Inserting trip data:', JSON.stringify(minimalTripData, null, 2));
+      // Create trip without stops
+      const tripWithoutStops = { ...tripData };
+      delete tripWithoutStops.stops;
       
-      // Try with minimal data
+      console.log('Inserting trip data:', JSON.stringify(tripWithoutStops, null, 2));
+      
+      // Create the trip
       const { data, error } = await this.supabase
         .from('trips')
-        .insert(minimalTripData)
+        .insert(tripWithoutStops)
         .select()
         .single();
       
       if (error) {
         console.error('Error creating trip:', error);
-        
-        // If the trips table doesn't exist, show a helpful error
-        if (error.message.includes('does not exist')) {
-          Alert.alert(
-            'Database Setup Required',
-            'The required tables don\'t exist in your Supabase project. Please run the setup SQL script provided in the README.md file.',
-            [{ text: 'OK' }]
-          );
-        }
-        
         return { trip: null, error: new Error(`Database error: ${error.message}`) };
       }
       
-      if (data) {
-        console.log('Trip created successfully:', data);
-        return { trip: data as Trip, error: null };
+      if (!data) {
+        return { trip: null, error: new Error('Failed to create trip - no data returned') };
       }
       
-      return { trip: null, error: new Error('Failed to create trip - no data returned') };
+      const newTrip = data as Trip;
+      console.log('Trip created successfully:', newTrip);
+      
+      // Now add stops one by one if there are any
+      if (stops.length > 0) {
+        console.log(`Adding ${stops.length} stops to trip ${newTrip.id}`);
+        
+        // Add each stop individually
+        const createdStops = [];
+        for (const stop of stops) {
+          // Extract only the data that matches our database schema
+          const stopData = {
+            stop_order: stop.stop_order || 0,
+            check_in: stop.check_in || new Date().toISOString().split('T')[0],
+            check_out: stop.check_out || new Date().toISOString().split('T')[0],
+            notes: stop.notes || '',
+            resort_id: stop.resort_id || '00000000-0000-4000-8000-000000000000'
+          };
+          
+          // If there's a location object in the stop, add it to notes
+          if (stop.location) {
+            const locationInfo = `${stop.location.address || ''} (${stop.location.latitude || 0}, ${stop.location.longitude || 0})`;
+            stopData.notes = stopData.notes ? `${stopData.notes}\nLocation: ${locationInfo}` : `Location: ${locationInfo}`;
+          }
+          
+          console.log(`Adding stop with order ${stopData.stop_order}`);
+          const { stop: createdStop, error: stopError } = await this.addTripStop(newTrip.id, stopData);
+          
+          if (stopError) {
+            console.error('Error adding stop:', stopError);
+          } else if (createdStop) {
+            createdStops.push(createdStop);
+            console.log('Stop created successfully:', createdStop);
+          }
+        }
+        
+        // Get the updated trip with stops
+        const { data: tripWithStops, error: getError } = await this.supabase
+          .from('trips')
+          .select(`
+            *,
+            trip_stops (*)
+          `)
+          .eq('id', newTrip.id)
+          .single();
+          
+        if (!getError && tripWithStops) {
+          const completeTrip = {
+            ...tripWithStops,
+            stops: tripWithStops.trip_stops || []
+          };
+          console.log('Retrieved complete trip with stops:', completeTrip.stops?.length || 0);
+          return { trip: completeTrip as Trip, error: null };
+        }
+      }
+      
+      return { trip: newTrip, error: null };
     } catch (error) {
       console.error('Error creating trip:', error);
       return { trip: null, error: error as Error };
@@ -538,6 +617,43 @@ class SupabaseService {
       console.warn('Database check failed with error:', err);
       // Still return success to skip verification
       return { success: true };
+    }
+  }
+
+  // Helper method to add a trip stop (called from createTrip)
+  async addTripStop(tripId: string, stopData: Omit<TripStop, 'id' | 'trip_id'>): Promise<{ stop: TripStop | null; error: Error | null }> {
+    try {
+      console.log('Adding trip stop for trip:', tripId);
+      console.log('Stop data received:', JSON.stringify(stopData, null, 2));
+      
+      // Extract only the fields that the database expects
+      const sanitizedData = {
+        trip_id: tripId,
+        resort_id: stopData.resort_id || '00000000-0000-4000-8000-000000000000',
+        stop_order: stopData.stop_order || 0,
+        check_in: stopData.check_in || new Date().toISOString().split('T')[0],
+        check_out: stopData.check_out || new Date().toISOString().split('T')[0],
+        notes: stopData.notes || ''
+      };
+      
+      console.log('Sanitized data for database insert:', JSON.stringify(sanitizedData, null, 2));
+      
+      const { data, error } = await this.supabase
+        .from('trip_stops')
+        .insert(sanitizedData)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Error adding trip stop:', error);
+        throw error;
+      }
+      
+      console.log('Trip stop added successfully:', data);
+      return { stop: data as TripStop, error: null };
+    } catch (error) {
+      console.error('Error in addTripStop:', error);
+      return { stop: null, error: error as Error };
     }
   }
 }

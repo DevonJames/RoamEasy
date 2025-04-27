@@ -55,6 +55,7 @@ export interface Trip {
   created_at: string;
   updated_at: string;
   stops?: TripStop[];
+  trip_stops?: TripStop[]; // For Supabase nested query results
 }
 
 interface TripsState {
@@ -103,19 +104,21 @@ export default function useTrips() {
 
       // If online and not guest, fetch from Supabase
       if (isConnected && !isGuest) {
-        const { data, error } = await SupabaseService.getUserTrips(user.id);
+        const { trips, error } = await SupabaseService.getTrips(user.id);
 
         if (error) {
           throw error;
         }
 
-        if (data) {
+        if (trips) {
           // Cache trips for offline use
-          await OfflineService.cacheTrips(data);
+          for (const trip of trips) {
+            await OfflineService.cacheTrip(trip);
+          }
           
           setState(prev => ({
             ...prev,
-            trips: data,
+            trips: trips,
             isLoading: false
           }));
         }
@@ -158,22 +161,22 @@ export default function useTrips() {
 
       // If online and not guest, fetch from Supabase
       if (isConnected && !isGuest) {
-        const { data, error } = await SupabaseService.getTripById(tripId);
+        const { trip, error } = await SupabaseService.getTripById(tripId);
 
         if (error) {
           throw error;
         }
 
-        if (data) {
+        if (trip) {
           // Cache trip for offline use
-          await OfflineService.cacheTrip(data);
+          await OfflineService.cacheTrip(trip);
           
           setState(prev => ({
             ...prev,
-            currentTrip: data,
+            currentTrip: trip,
             isLoading: false
           }));
-          return data;
+          return trip;
         }
       }
 
