@@ -30,8 +30,16 @@ type AuthStackParamList = {
 };
 
 type MainStackParamList = {
-  RoutePlanner: undefined;
+  Main: undefined; // This is the main tab navigator
+  Itinerary: { tripId: string };
+  ResortDetails: { tripId: string, stopId: string };
+};
+
+type TabStackParamList = {
   Home: undefined;
+  RoutePlanner: undefined;
+  OfflineTrips: undefined;
+  Settings: undefined;
 };
 
 type GuestModeScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList & MainStackParamList>;
@@ -42,6 +50,7 @@ interface FeatureCard {
   title: string;
   description: string;
   available: boolean;
+  onPress?: () => void;
 }
 
 const GuestModeScreen = () => {
@@ -49,19 +58,45 @@ const GuestModeScreen = () => {
   const { continueAsGuest } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleContinueAsGuest = async () => {
+  const handleContinueAsGuest = async (redirectTo?: 'RoutePlanner' | 'Home') => {
     setIsLoading(true);
     try {
       const result = await continueAsGuest();
       if (!result.success && result.error) {
         Alert.alert('Error', result.error.message);
+      } else {
+        // Successfully set guest mode, now navigate directly
+        console.log('Successfully set guest mode, navigating to:', redirectTo || 'Home');
+        
+        // First navigate to the Main tab navigator
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Main' }]
+        });
       }
-      // Navigation will happen via AppNavigator
     } catch (err) {
       Alert.alert('Error', 'Could not continue as guest. Please try again.');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleFeatureCardPress = (feature: string) => {
+    // When a feature card is pressed, we should first set guest mode
+    Alert.alert(
+      'Guest Mode',
+      'To use this feature, please continue as a guest first.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Continue as Guest',
+          onPress: () => handleContinueAsGuest(feature === 'Route Planning' ? 'RoutePlanner' : 'Home'),
+        },
+      ]
+    );
   };
 
   const featureCards: FeatureCard[] = [
@@ -70,12 +105,14 @@ const GuestModeScreen = () => {
       title: 'Route Planning',
       description: 'Plan multi-stop routes with daily driving limits',
       available: true,
+      onPress: () => handleFeatureCardPress('Route Planning')
     },
     {
       icon: 'bed-outline',
       title: 'Resort Suggestions',
       description: 'Get curated resort recommendations',
       available: true,
+      onPress: () => handleFeatureCardPress('Resort Suggestions')
     },
     {
       icon: 'save-outline',
@@ -117,35 +154,59 @@ const GuestModeScreen = () => {
           <Text style={styles.featuresTitle}>Available Features</Text>
           
           {featureCards.map((feature, index) => (
-            <View key={index} style={[styles.featureCard, !feature.available && styles.disabledFeature]}>
-              <View style={styles.featureIconContainer}>
-                <Ionicons 
-                  name={feature.icon} 
-                  size={24} 
-                  color={feature.available ? COLORS.primary : '#BDBDBD'} 
-                />
-              </View>
-              <View style={styles.featureContent}>
-                <Text style={[styles.featureTitle, !feature.available && styles.disabledText]}>
-                  {feature.title}
-                </Text>
-                <Text style={[styles.featureDescription, !feature.available && styles.disabledText]}>
-                  {feature.description}
-                </Text>
-              </View>
-              {!feature.available && (
-                <View style={styles.lockContainer}>
-                  <Ionicons name="lock-closed" size={18} color="#BDBDBD" />
+            feature.available && feature.onPress ? (
+              <TouchableOpacity 
+                key={index} 
+                style={styles.featureCard}
+                onPress={feature.onPress}
+                activeOpacity={0.7}
+                accessible={true}
+                accessibilityLabel={feature.title}
+                accessibilityHint={`Tap to use ${feature.title}`}
+              >
+                <View style={styles.featureIconContainer}>
+                  <Ionicons 
+                    name={feature.icon} 
+                    size={24} 
+                    color={COLORS.primary} 
+                  />
                 </View>
-              )}
-            </View>
+                <View style={styles.featureContent}>
+                  <Text style={styles.featureTitle}>{feature.title}</Text>
+                  <Text style={styles.featureDescription}>{feature.description}</Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <View key={index} style={[styles.featureCard, !feature.available && styles.disabledFeature]}>
+                <View style={styles.featureIconContainer}>
+                  <Ionicons 
+                    name={feature.icon} 
+                    size={24} 
+                    color={feature.available ? COLORS.primary : '#BDBDBD'} 
+                  />
+                </View>
+                <View style={styles.featureContent}>
+                  <Text style={[styles.featureTitle, !feature.available && styles.disabledText]}>
+                    {feature.title}
+                  </Text>
+                  <Text style={[styles.featureDescription, !feature.available && styles.disabledText]}>
+                    {feature.description}
+                  </Text>
+                </View>
+                {!feature.available && (
+                  <View style={styles.lockContainer}>
+                    <Ionicons name="lock-closed" size={18} color="#BDBDBD" />
+                  </View>
+                )}
+              </View>
+            )
           ))}
         </View>
 
         <View style={styles.buttonContainer}>
           <TouchableOpacity 
             style={[styles.button, styles.primaryButton, isLoading && styles.disabledButton]} 
-            onPress={handleContinueAsGuest}
+            onPress={() => handleContinueAsGuest('Home')}
             disabled={isLoading}
           >
             <Text style={styles.buttonText}>

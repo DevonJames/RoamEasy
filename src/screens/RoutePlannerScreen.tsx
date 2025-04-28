@@ -21,9 +21,11 @@ import { Ionicons } from '@expo/vector-icons';
 import useMaps from '../hooks/useMaps';
 import { usePreferences } from '../hooks/usePreferences';
 import useTrips, { TripStop } from '../hooks/useTrips';
+import useAuth from '../hooks/useAuth';
 import { debounce } from 'lodash';
 import SupabaseService from '../services/SupabaseService';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../utils/environment';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 // Define navigation types
 type RootStackParamList = {
@@ -96,27 +98,81 @@ interface UserPreferences {
   };
 }
 
+// Update interface for the location object
+interface Location {
+  address: string;
+  coordinates: {
+    latitude: number;
+    longitude: number;
+  };
+}
+
+// Update the Location interface to match what the API returns
+interface PlanningStop {
+  coordinates: {
+    latitude: number;
+    longitude: number;
+  };
+  address: string;
+}
+
+interface RouteCalculationResult {
+  success: boolean;
+  routeResult?: RouteResult;
+}
+
 const RoutePlannerScreen = () => {
   const navigation = useNavigation<RoutePlannerScreenNavigationProp>();
   const { preferences, isLoading: prefsLoading } = usePreferences<UserPreferences>();
   const { planRoute, searchLocation, isLoading: mapsLoading } = useMaps();
   const { createTrip, isLoading: tripLoading } = useTrips();
+  const { user, isAuthenticated, isGuest } = useAuth();
 
   // Form state
   const [tripName, setTripName] = useState('');
-  const [startLocation, setStartLocation] = useState('');
-  const [endLocation, setEndLocation] = useState('');
+  const [startLocation, setStartLocation] = useState<string>('');
+  const [endLocation, setEndLocation] = useState<string>('');
   const [startLocationResults, setStartLocationResults] = useState<LocationResult[]>([]);
   const [endLocationResults, setEndLocationResults] = useState<LocationResult[]>([]);
-  const [maxDriveHours, setMaxDriveHours] = useState(5);
+  const [maxDriveHours, setMaxDriveHours] = useState<number>(4);
   const [selectedScenery, setSelectedScenery] = useState<string[]>([]);
-  const [step, setStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState<number>(1);
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationResult[]>([]);
+  const [geocodedStart, setGeocodedStart] = useState<{ address: string; coordinates: { latitude: number; longitude: number } } | null>(null);
+  const [geocodedEnd, setGeocodedEnd] = useState<{ address: string; coordinates: { latitude: number; longitude: number } } | null>(null);
+  const [searchingLocation, setSearchingLocation] = useState<boolean>(false);
+  const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [isStartFocused, setIsStartFocused] = useState(false);
-  const [isEndFocused, setIsEndFocused] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  
+  // Add state for trip start date and nights per stop
+  const [tripStartDate, setTripStartDate] = useState<Date>(new Date());
+  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
+  const [nightsPerStop, setNightsPerStop] = useState<number[]>([1, 1, 1, 1, 1]); // Default 1 night per stop
 
   const isLoadingCombined = prefsLoading || mapsLoading || tripLoading || isLoading;
+  const [activeSearchField, setActiveSearchField] = useState<'start' | 'end' | null>(null);
+
+  // Generate trip name based on locations and travel days
+  const generateTripName = useCallback(() => {
+    if (!startLocation || !endLocation) return '';
+    
+    const startCity = startLocation.split(',')[0].trim();
+    const endCity = endLocation.split(',')[0].trim();
+    
+    // Calculate total travel days based on nights per stop
+    const totalDays = nightsPerStop.reduce((sum, nights) => sum + nights, 0);
+    
+    return `${startCity} to ${endCity} (${totalDays} days)`;
+  }, [startLocation, endLocation, nightsPerStop]);
+
+  // Update trip name when locations or nights change
+  useEffect(() => {
+    const newTripName = generateTripName();
+    if (newTripName) {
+      setTripName(newTripName);
+    }
+  }, [startLocation, endLocation, nightsPerStop, generateTripName]);
 
   // Load preferences on mount
   useEffect(() => {
@@ -132,60 +188,6 @@ const RoutePlannerScreen = () => {
       }
     }
   }, [preferences]);
-
-  // Test Supabase connection on mount
-  useEffect(() => {
-    async function testSupabaseConnection() {
-      console.log('Testing Supabase connection...');
-      console.log('URL:', SUPABASE_URL);
-      console.log('Key:', SUPABASE_ANON_KEY ? 'Exists (not shown for security)' : 'Missing');
-      
-      try {
-        // First check the database schema
-        const dbCheck = await SupabaseService.checkDatabase();
-        if (!dbCheck.success) {
-          console.error('Database check failed:', dbCheck.error);
-          console.log('Available tables:', dbCheck.tables);
-          
-          if (dbCheck.tables && dbCheck.tables.length > 0) {
-            Alert.alert(
-              'Database Error',
-              `The app cannot connect to the required tables. Please check the Supabase project setup.\n\nError: ${dbCheck.error}`,
-              [{ text: 'OK' }]
-            );
-          } else {
-            Alert.alert(
-              'Database Connection Error',
-              'Cannot connect to Supabase. Please check your internet connection and API keys.',
-              [{ text: 'OK' }]
-            );
-          }
-          return;
-        }
-        
-        console.log('Database check passed, tables:', dbCheck.tables);
-        
-        // Test retrieving trips as well
-        const testUserId = '00000000-0000-0000-0000-000000000000';
-        const { trips, error } = await SupabaseService.getTrips(testUserId);
-          
-        if (error) {
-          console.error('Error accessing trips table:', error);
-        } else {
-          console.log('Successfully connected to trips table, found trips:', trips.length);
-        }
-      } catch (err) {
-        console.error('Failed to test Supabase connection:', err);
-        Alert.alert(
-          'Connection Error',
-          'An unexpected error occurred while connecting to the database.',
-          [{ text: 'OK' }]
-        );
-      }
-    }
-    
-    testSupabaseConnection();
-  }, []);
 
   // Search locations with debounce
   const debouncedSearchStart = useCallback(
@@ -238,28 +240,64 @@ const RoutePlannerScreen = () => {
     []
   );
 
-  // Handle location input changes
+  // Location handling functions
   const handleStartLocationChange = (text: string) => {
     setStartLocation(text);
-    debouncedSearchStart(text);
+    setGeocodedStart(null); // Clear previous selection
+    if (text.length > 2) {
+      searchLocation(text)
+        .then(result => {
+          if (result.success && result.locations) {
+            // Convert the location results to the format expected by the component
+            const locationResults = result.locations.map(loc => ({
+              description: loc.address,
+              placeId: loc.placeId || String(Date.now()),
+              mainText: loc.address.split(',')[0],
+              secondaryText: loc.address
+            }));
+            setStartLocationResults(locationResults);
+          }
+        })
+        .catch(err => console.error('Error searching start location:', err));
+    } else {
+      setStartLocationResults([]);
+    }
   };
 
   const handleEndLocationChange = (text: string) => {
     setEndLocation(text);
-    debouncedSearchEnd(text);
+    setGeocodedEnd(null); // Clear previous selection
+    if (text.length > 2) {
+      searchLocation(text)
+        .then(result => {
+          if (result.success && result.locations) {
+            // Convert the location results to the format expected by the component
+            const locationResults = result.locations.map(loc => ({
+              description: loc.address,
+              placeId: loc.placeId || String(Date.now()),
+              mainText: loc.address.split(',')[0],
+              secondaryText: loc.address
+            }));
+            setEndLocationResults(locationResults);
+          }
+        })
+        .catch(err => console.error('Error searching end location:', err));
+    } else {
+      setEndLocationResults([]);
+    }
   };
 
   // Handle selection of location from autocomplete results
   const handleSelectStartLocation = (item: LocationResult) => {
     setStartLocation(item.description);
     setStartLocationResults([]);
-    setIsStartFocused(false);
+    setSearchingLocation(false);
   };
 
   const handleSelectEndLocation = (item: LocationResult) => {
     setEndLocation(item.description);
     setEndLocationResults([]);
-    setIsEndFocused(false);
+    setSearchingLocation(false);
   };
 
   // Handle scenery selection
@@ -273,40 +311,58 @@ const RoutePlannerScreen = () => {
 
   // Navigation between steps
   const handleNextStep = () => {
-    if (step === 1) {
-      if (!tripName.trim()) {
-        setError('Please provide a name for your trip');
-        return;
-      }
-      if (!startLocation.trim()) {
-        setError('Please provide a starting location');
-        return;
-      }
-      if (!endLocation.trim()) {
-        setError('Please provide an end destination');
+    if (currentStep === 1) {
+      // Remove the tripName validation since we auto-generate it
+      if (!startLocation || !endLocation) {
+        setError('Please enter both start and end locations');
         return;
       }
       setError(null);
-      setStep(2);
-    } else if (step === 2) {
+      setCurrentStep(2);
+    } else if (currentStep === 2) {
       if (selectedScenery.length === 0) {
         setError('Please select at least one scenery preference');
         return;
       }
       setError(null);
-      handlePlanRoute();
+      // Calculate route before going to step 3
+      calculateRoute().then((result) => {
+        if (result.success && result.routeResult) {
+          setCurrentStep(3);
+        } else {
+          setError('Failed to calculate route. Please try again.');
+        }
+      }).catch(err => {
+        setError('Failed to calculate route. Please try again.');
+        console.error('Route calculation error:', err);
+      });
     }
   };
 
   const handlePreviousStep = () => {
-    if (step > 1) {
-      setStep(step - 1);
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1);
       setError(null);
     }
   };
 
+  // Add a function to handle date changes
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    setShowDatePicker(false);
+    if (selectedDate) {
+      setTripStartDate(selectedDate);
+    }
+  };
+
+  // Add a function to handle changing nights for a specific stop
+  const handleNightsChange = (index: number, nights: number) => {
+    const updatedNights = [...nightsPerStop];
+    updatedNights[index] = nights;
+    setNightsPerStop(updatedNights);
+  };
+
   // Calculate route using Maps service
-  const calculateRoute = async () => {
+  const calculateRoute = async (): Promise<RouteCalculationResult> => {
     try {
       setError(null);
       // Convert string array to object format expected by planRoute
@@ -367,39 +423,49 @@ const RoutePlannerScreen = () => {
       
       // Debug information for route planning
       console.log('Route planning result:', JSON.stringify(result, null, 2));
-      console.log('Stops received from route planning:', result.stops?.length || 0);
+      console.log('Stops received from route planning:', result.stops.length);
       
       // Important fix: If we get stops directly from route planning or from result.stops, use those
-      const planningStops = result.stops || [];
-      console.log('Planning stops before processing:', JSON.stringify(planningStops, null, 2));
+      const planningStops = result.stops as unknown as PlanningStop[];
+      console.log('Planning stops before processing:', result.stops);
       
-      if (planningStops && planningStops.length > 0) {
-        // Calculate dates for each stop
-        const todayDate = new Date();
-        const recommendedStops = planningStops.map((stop, index) => ({
-          date: new Date(todayDate.getTime() + index * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          location: {
-            latitude: stop.coordinates.latitude,
-            longitude: stop.coordinates.longitude,
-            address: stop.address || `Location near ${stop.coordinates.latitude}, ${stop.coordinates.longitude}`
-          }
-        }));
+      if (result.success && result.route && result.stops) {
+        console.log('Stops received from route planning:', result.stops.length);
+        console.log('Planning stops before processing:', result.stops);
+
+        // Create a date object for the selected start date
+        let currentDate = new Date(tripStartDate);
         
+        // Map the planning stops to RouteStop format with proper dates
+        const recommendedStops = planningStops.map((stop, index) => {
+          // Create a copy of the current date
+          const stopDate = new Date(currentDate);
+          
+          // For the next stop, add the number of nights from previous stop
+          if (index > 0) {
+            currentDate.setDate(currentDate.getDate() + (nightsPerStop[index-1] || 1));
+          }
+          
+          return {
+            date: stopDate.toISOString().split('T')[0],
+            location: {
+              latitude: stop.coordinates.latitude,
+              longitude: stop.coordinates.longitude,
+              address: stop.address || `Location near ${stop.coordinates.latitude}, ${stop.coordinates.longitude}`
+            }
+          };
+        });
+
         console.log('Created recommendedStops from planning stops:', JSON.stringify(recommendedStops, null, 2));
         
-        const mockRouteResult: RouteResult = {
-          startCoords: {
-            latitude: startLocationObj.coordinates.latitude,
-            longitude: startLocationObj.coordinates.longitude
-          },
-          endCoords: {
-            latitude: endLocationObj.coordinates.latitude,
-            longitude: endLocationObj.coordinates.longitude
-          },
-          recommendedStops: recommendedStops
+        const routeResult: RouteResult = {
+          startCoords: result.route.waypoints[0].coordinates,
+          endCoords: result.route.waypoints[1].coordinates,
+          recommendedStops
         };
         
-        return mockRouteResult;
+        setRouteResult(routeResult);
+        return { success: true, routeResult };
       }
       
       // For now, construct a mock RouteResult that matches the interface our app expects
@@ -465,7 +531,8 @@ const RoutePlannerScreen = () => {
       }
       
       console.log('Final mockRouteResult:', JSON.stringify(mockRouteResult, null, 2));
-      return mockRouteResult;
+      setRouteResult(mockRouteResult);
+      return { success: true, routeResult: mockRouteResult };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
       throw new Error(errorMessage);
@@ -473,88 +540,210 @@ const RoutePlannerScreen = () => {
   };
 
   // Create trip with calculated route
+  const verifyTripExists = async (tripId: string): Promise<boolean> => {
+    console.log('Verifying trip exists:', tripId);
+    try {
+      const result = await SupabaseService.getTripById(tripId);
+      if (result.error) {
+        console.error('Error verifying trip:', result.error);
+        return false;
+      }
+      if (!result.trip) {
+        console.error('Trip not found during verification:', tripId);
+        return false;
+      }
+      console.log('Trip verified successfully:', tripId);
+      return true;
+    } catch (error) {
+      console.error('Exception during trip verification:', error);
+      return false;
+    }
+  };
+
   const handlePlanRoute = async () => {
     try {
-      setError(null);
       setIsLoading(true);
-      const routeResult = await calculateRoute();
+      setError(null);
 
-      if (!routeResult) {
-        throw new Error('Failed to calculate route');
+      if (!routeResult || !routeResult.recommendedStops || routeResult.recommendedStops.length === 0) {
+        throw new Error('No route data available');
       }
 
-      console.log('Route result with stops:', routeResult.recommendedStops.length);
-      console.log('Creating stop data from recommended stops:', JSON.stringify(routeResult.recommendedStops, null, 2));
-
-      // Map recommended stops to the format expected by createTrip
-      const stops = routeResult.recommendedStops.map((stop, index) => ({
-        location: {
-          latitude: stop.location.latitude,
-          longitude: stop.location.longitude,
-          address: stop.location.address
-        },
-        stop_order: index,
-        check_in: stop.date,
-        check_out: index < routeResult.recommendedStops.length - 1 
-          ? routeResult.recommendedStops[index + 1].date 
-          : new Date(new Date(stop.date).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Next day as default
-        notes: `Location: ${stop.location.address}`,
-        resort_id: '00000000-0000-4000-8000-000000000000' // Default resort ID required by schema
-      }));
-
-      console.log('Final stops being sent with createTrip:', JSON.stringify(stops, null, 2));
-
-      // Debug log all trip data
-      console.log('COMPLETE TRIP DATA BEFORE CREATION:', JSON.stringify({
+      // Create trip data
+      const tripData = {
+        user_id: '00000000-0000-4000-8000-000000000000', // Mock user ID for testing
         name: tripName,
         start_location: {
-          address: startLocation,
           latitude: routeResult.startCoords.latitude,
-          longitude: routeResult.startCoords.longitude
+          longitude: routeResult.startCoords.longitude,
+          address: routeResult.recommendedStops[0].location.address
         },
         end_location: {
-          address: endLocation,
           latitude: routeResult.endCoords.latitude,
-          longitude: routeResult.endCoords.longitude
+          longitude: routeResult.endCoords.longitude,
+          address: routeResult.recommendedStops[routeResult.recommendedStops.length - 1].location.address
         },
-        status: 'planned',
-        stops: stops
-      }, null, 2));
+        status: 'planned' as const
+      };
 
-      // Verify stops array is valid and non-empty
-      if (!stops || stops.length === 0) {
-        console.warn('WARNING: No stops detected before trip creation!');
-        console.log('Route result had recommendedStops:', routeResult.recommendedStops.length);
+      console.log('Creating trip with data:', tripData);
+      const tripResponse = await createTrip(tripData);
+
+      if (tripResponse.error || !tripResponse.trip) {
+        throw new Error(tripResponse.error?.message || 'Failed to create trip');
       }
 
-      // Create the trip with the calculated route
-      const newTrip = await createTrip({
-        name: tripName,
-        start_location: {
-          address: startLocation,
-          latitude: routeResult.startCoords.latitude,
-          longitude: routeResult.startCoords.longitude
-        },
-        end_location: {
-          address: endLocation,
-          latitude: routeResult.endCoords.latitude,
-          longitude: routeResult.endCoords.longitude
-        },
-        status: 'planned',
-        stops: stops
+      const tripId = tripResponse.trip.id;
+      console.log(`Trip created with ID: ${tripId}`);
+
+      // Wait for database consistency
+      console.log('Waiting for database consistency before adding stops...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // Verify trip exists
+      const tripExists = await verifyTripExists(tripId);
+      if (!tripExists) {
+        throw new Error('Could not verify trip exists in database');
+      }
+      
+      // Map the recommended stops to the format needed for trip creation
+      const tripStops = routeResult.recommendedStops.map((stop, index) => {
+        // Use the date from the stop object which was calculated based on tripStartDate
+        const checkInDate = new Date(stop.date);
+        
+        // Calculate checkout based on the number of nights for this stop
+        const checkOutDate = new Date(checkInDate);
+        checkOutDate.setDate(checkOutDate.getDate() + (nightsPerStop[index] || 1));
+        
+        // Create a rich notes field with location information for extraction later
+        const locationNote = stop.location 
+          ? `Location: ${stop.location.address} (${stop.location.latitude}, ${stop.location.longitude})`
+          : '';
+        
+        return {
+          resort_id: '00000000-0000-4000-8000-000000000000', // Default placeholder
+          stop_order: index,
+          check_in: checkInDate.toISOString().split('T')[0],
+          check_out: checkOutDate.toISOString().split('T')[0],
+          notes: locationNote
+        };
       });
 
+      // Add stops with proper error handling and retries
+      console.log(`Starting to add ${tripStops.length} stops to trip ${tripId}`);
+      const addedStops = [];
+      const failedStops = [];
+      
+      for (let index = 0; index < tripStops.length; index++) {
+        const stop = tripStops[index];
+        let attempts = 0;
+        let success = false;
+        const maxAttempts = 5;
+        
+        // Make sure stop has all required fields for the database
+        const stopData = {
+          resort_id: stop.resort_id,
+          stop_order: stop.stop_order,
+          check_in: stop.check_in,
+          check_out: stop.check_out,
+          notes: stop.notes || `Location for stop ${index + 1}`
+        };
+        
+        console.log(`Adding stop ${index + 1}/${tripStops.length}...`, stopData);
+        
+        while (!success && attempts < maxAttempts) {
+          attempts++;
+          try {
+            const result = await SupabaseService.addTripStop(tripId, stopData);
+            if (result.error) {
+              console.error(`Error adding stop ${index} (attempt ${attempts}):`, result.error);
+              // Wait with exponential backoff
+              const backoffTime = Math.pow(2, attempts) * 1000;
+              console.log(`Retrying in ${backoffTime / 1000} seconds...`);
+              await new Promise(resolve => setTimeout(resolve, backoffTime));
+            } else {
+              console.log(`Successfully added stop ${index} to trip:`, result.stop?.id);
+              addedStops.push(result.stop);
+              success = true;
+            }
+          } catch (error) {
+            console.error(`Exception adding stop ${index} (attempt ${attempts}):`, error);
+            if (attempts >= maxAttempts) {
+              failedStops.push({index, error});
+            }
+            // Wait with exponential backoff
+            const backoffTime = Math.pow(2, attempts) * 1000;
+            await new Promise(resolve => setTimeout(resolve, backoffTime));
+          }
+        }
+        
+        if (!success) {
+          console.error(`Failed to add stop ${index} after ${maxAttempts} attempts`);
+        }
+      }
+      
+      // Get the final trip with all stops
+      const finalTrip = await SupabaseService.getTripById(tripId);
+      
       setIsLoading(false);
-      if (newTrip.success && newTrip.trip) {
-        navigation.navigate('Itinerary', { tripId: newTrip.trip.id });
+      
+      if (failedStops.length > 0) {
+        console.warn(`Some stops (${failedStops.length}) failed to add`);
+        Alert.alert(
+          'Some Stops Not Added', 
+          `Created trip with ${addedStops.length} out of ${tripStops.length} stops.`
+        );
+      }
+      
+      if (!finalTrip.error && finalTrip.trip) {
+        navigation.navigate('ItineraryScreen', { tripId });
+        return { tripId };
       } else {
-        throw new Error(newTrip.error?.message || 'Failed to create trip');
+        // Navigate anyway, as we at least have the trip created
+        console.warn('Could not fetch final trip, but continuing with navigation');
+        navigation.navigate('ItineraryScreen', { tripId });
+        return { tripId };
       }
     } catch (err) {
       setIsLoading(false);
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
-      setError(errorMessage);
-      Alert.alert('Route Planning Error', errorMessage);
+      console.error('Error in handlePlanRoute:', errorMessage);
+      Alert.alert('Error', `Failed to create trip: ${errorMessage}`);
+      return null;
+    }
+  };
+
+  // Add a new function to handle viewing resort options
+  const handleViewResortOptions = async (stopIndex: number) => {
+    try {
+      // First check if we already have a tripId from a previous creation
+      if (!routeResult || !routeResult.recommendedStops) {
+        Alert.alert('Error', 'No route data available');
+        return;
+      }
+
+      setIsLoading(true);
+
+      // Create the trip only if it hasn't been created yet
+      let tripResult = await handlePlanRoute();
+      
+      if (!tripResult || !tripResult.tripId) {
+        setIsLoading(false);
+        Alert.alert('Error', 'Failed to create trip. Please try again.');
+        return;
+      }
+
+      setIsLoading(false);
+      
+      // Navigate to the resort details screen with the tripId and stopId
+      navigation.navigate('ResortDetailsScreen', { 
+        tripId: tripResult.tripId, 
+        stopId: stopIndex.toString() 
+      });
+    } catch (error) {
+      setIsLoading(false);
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      Alert.alert('Error', `Failed to view resort options: ${errorMessage}`);
     }
   };
 
@@ -602,6 +791,214 @@ const RoutePlannerScreen = () => {
     );
   };
 
+  // Add UI for date selection and nights per stop in the proper step
+  const renderLocationStep = () => (
+    <View style={styles.stepContainer}>
+      <Text style={styles.stepTitle}>Where are you going?</Text>
+      <Text style={styles.stepDescription}>Enter your starting point and destination.</Text>
+      
+      <View style={styles.inputGroup}>
+        <Text style={styles.inputLabel}>Starting Point</Text>
+        <View style={styles.locationInputContainer}>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="locate-outline" size={20} color={COLORS.primary} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Denver, CO"
+              value={startLocation}
+              onChangeText={handleStartLocationChange}
+              onFocus={() => setActiveSearchField('start')}
+              accessibilityLabel="Starting location input"
+            />
+          </View>
+          {activeSearchField === 'start' && startLocationResults.length > 0 && (
+            <FlatList
+              data={startLocationResults}
+              keyExtractor={(item) => item.placeId || item.description}
+              renderItem={({ item }) => renderLocationItem(item, handleSelectStartLocation)}
+              style={styles.locationResultsList}
+              keyboardShouldPersistTaps="handled"
+            />
+          )}
+        </View>
+      </View>
+      
+      <View style={styles.inputGroup}>
+        <Text style={styles.inputLabel}>Destination</Text>
+        <View style={styles.locationInputContainer}>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="flag-outline" size={20} color={COLORS.primary} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Yellowstone National Park"
+              value={endLocation}
+              onChangeText={handleEndLocationChange}
+              onFocus={() => setActiveSearchField('end')}
+              accessibilityLabel="Destination input"
+            />
+          </View>
+          {activeSearchField === 'end' && endLocationResults.length > 0 && (
+            <FlatList
+              data={endLocationResults}
+              keyExtractor={(item) => item.placeId || item.description}
+              renderItem={({ item }) => renderLocationItem(item, handleSelectEndLocation)}
+              style={styles.locationResultsList}
+              keyboardShouldPersistTaps="handled"
+            />
+          )}
+        </View>
+      </View>
+      
+      {/* Trip Start Date Picker */}
+      <View style={styles.inputGroup}>
+        <Text style={styles.inputLabel}>Trip Start Date</Text>
+        <TouchableOpacity 
+          style={styles.datePickerButton}
+          onPress={() => setShowDatePicker(true)}
+        >
+          <Text style={styles.dateText}>{tripStartDate.toLocaleDateString()}</Text>
+          <Ionicons name="calendar-outline" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+      </View>
+      
+      {showDatePicker && (
+        <DateTimePicker
+          value={tripStartDate}
+          mode="date"
+          display="default"
+          onChange={handleDateChange}
+          minimumDate={new Date()} // Can't select dates in the past
+        />
+      )}
+
+      <View style={styles.inputGroup}>
+        <Text style={styles.inputLabel}>
+          Maximum Driving Hours Per Day: {maxDriveHours} hours
+        </Text>
+        <Slider
+          style={styles.slider}
+          minimumValue={2}
+          maximumValue={10}
+          step={0.5}
+          value={maxDriveHours}
+          onValueChange={setMaxDriveHours}
+          minimumTrackTintColor={COLORS.primary}
+          maximumTrackTintColor="#D8D8D8"
+          thumbTintColor={COLORS.secondary}
+          accessibilityLabel={`Maximum daily driving time, currently ${maxDriveHours} hours`}
+        />
+        <View style={styles.sliderLabels}>
+          <Text style={styles.sliderLabel}>2h</Text>
+          <Text style={styles.sliderLabel}>10h</Text>
+        </View>
+      </View>
+      
+      <TouchableOpacity
+        style={[
+          styles.nextButton,
+          (!geocodedStart || !geocodedEnd) && styles.disabledButton
+        ]}
+        onPress={handleNextStep}
+        disabled={!geocodedStart || !geocodedEnd}
+      >
+        <Text style={styles.nextButtonText}>Next: Scenery Preferences</Text>
+        <Ionicons name="arrow-forward" size={20} color="white" />
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Update the UI to use the new function
+  const renderRouteReviewStep = () => {
+    if (!routeResult || !routeResult.recommendedStops || routeResult.recommendedStops.length === 0) {
+      return (
+        <View style={styles.stepContainer}>
+          <Text style={styles.stepTitle}>No Route Calculated</Text>
+          <Text style={styles.stepDescription}>Please go back and calculate a route first.</Text>
+          <TouchableOpacity style={styles.backButton} onPress={handlePreviousStep}>
+            <Ionicons name="arrow-back" size={20} color="white" />
+            <Text style={styles.backButtonText}>Back</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.stepContainer}>
+        <Text style={styles.stepTitle}>Review Your Trip</Text>
+        <Text style={styles.tripNameDisplay}>{tripName}</Text>
+        <Text style={styles.stepDescription}>Review your itinerary and customize nights per stop.</Text>
+        
+        <FlatList
+          data={routeResult.recommendedStops}
+          keyExtractor={(item, index) => `stop-${index}`}
+          renderItem={({ item, index }) => (
+            <View style={styles.stopCard}>
+              <View style={styles.stopHeader}>
+                <Text style={styles.stopNumber}>Stop {index + 1}</Text>
+                <Text style={styles.stopDate}>{new Date(item.date).toLocaleDateString()}</Text>
+              </View>
+              
+              <Text style={styles.stopAddress}>{item.location.address}</Text>
+              
+              <View style={styles.stopActions}>
+                {/* Add nights control for each stop */}
+                <View style={styles.nightsContainer}>
+                  <Text style={styles.nightsLabel}>Nights at this stop:</Text>
+                  <View style={styles.nightsControl}>
+                    <TouchableOpacity 
+                      style={styles.nightsButton}
+                      onPress={() => handleNightsChange(index, Math.max(1, nightsPerStop[index] - 1))}
+                    >
+                      <Ionicons name="remove" size={18} color="white" />
+                    </TouchableOpacity>
+                    <Text style={styles.nightsValue}>{nightsPerStop[index] || 1}</Text>
+                    <TouchableOpacity 
+                      style={styles.nightsButton}
+                      onPress={() => handleNightsChange(index, (nightsPerStop[index] || 1) + 1)}
+                    >
+                      <Ionicons name="add" size={18} color="white" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                
+                <TouchableOpacity 
+                  style={styles.resortButton}
+                  onPress={() => handleViewResortOptions(index)}
+                >
+                  <Ionicons name="business-outline" size={18} color="white" />
+                  <Text style={styles.resortButtonText}>View Resort Options</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          style={styles.stopsList}
+        />
+        
+        <View style={styles.buttonRow}>
+          <TouchableOpacity style={styles.backButton} onPress={handlePreviousStep}>
+            <Ionicons name="arrow-back" size={20} color="white" />
+            <Text style={styles.backButtonText}>Back</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.planButton} 
+            onPress={handlePlanRoute}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="white" size="small" />
+            ) : (
+              <>
+                <Text style={styles.planButtonText}>Plan Route</Text>
+                <Ionicons name="checkmark-circle" size={20} color="white" />
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
@@ -614,16 +1011,16 @@ const RoutePlannerScreen = () => {
         >
           <View style={styles.header}>
             <Text style={styles.title}>
-              {step === 1 ? 'Plan Your Route' : 'Scenery Preferences'}
+              {currentStep === 1 ? 'Plan Your Route' : 
+               currentStep === 2 ? 'Scenery Preferences' : 
+               'Review Your Trip'}
             </Text>
-            {step > 1 && (
+            {currentStep > 1 && (
               <TouchableOpacity 
                 onPress={handlePreviousStep}
                 style={styles.backButton}
-                accessible={true}
-                accessibilityLabel="Go back to previous step"
               >
-                <Text style={styles.backButtonText}>Back</Text>
+                <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
               </TouchableOpacity>
             )}
           </View>
@@ -637,103 +1034,15 @@ const RoutePlannerScreen = () => {
           {isLoadingCombined ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={COLORS.primary} />
-              <Text style={styles.loadingText}>Planning your perfect route...</Text>
+              <Text style={styles.loadingText}>
+                {isLoading ? 'Planning your perfect route...' : 'Loading...'}
+              </Text>
             </View>
           ) : (
             <>
-              {step === 1 && (
-                <View style={styles.formContainer}>
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Trip Name</Text>
-                    <View style={styles.inputWrapper}>
-                      <Ionicons name="bookmark-outline" size={20} color={COLORS.primary} style={styles.inputIcon} />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="e.g., Summer Mountains Adventure"
-                        value={tripName}
-                        onChangeText={setTripName}
-                        accessibilityLabel="Trip name input"
-                      />
-                    </View>
-                  </View>
+              {currentStep === 1 && renderLocationStep()}
 
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Starting Point</Text>
-                    <View style={styles.locationInputContainer}>
-                      <View style={styles.inputWrapper}>
-                        <Ionicons name="locate-outline" size={20} color={COLORS.primary} style={styles.inputIcon} />
-                        <TextInput
-                          style={styles.input}
-                          placeholder="e.g., Denver, CO"
-                          value={startLocation}
-                          onChangeText={handleStartLocationChange}
-                          onFocus={() => setIsStartFocused(true)}
-                          accessibilityLabel="Starting location input"
-                        />
-                      </View>
-                      {isStartFocused && startLocationResults.length > 0 && (
-                        <FlatList
-                          data={startLocationResults}
-                          keyExtractor={(item) => item.placeId || item.description}
-                          renderItem={({ item }) => renderLocationItem(item, handleSelectStartLocation)}
-                          style={styles.locationResultsList}
-                          keyboardShouldPersistTaps="handled"
-                        />
-                      )}
-                    </View>
-                  </View>
-
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Destination</Text>
-                    <View style={styles.locationInputContainer}>
-                      <View style={styles.inputWrapper}>
-                        <Ionicons name="flag-outline" size={20} color={COLORS.primary} style={styles.inputIcon} />
-                        <TextInput
-                          style={styles.input}
-                          placeholder="e.g., Yellowstone National Park"
-                          value={endLocation}
-                          onChangeText={handleEndLocationChange}
-                          onFocus={() => setIsEndFocused(true)}
-                          accessibilityLabel="Destination input"
-                        />
-                      </View>
-                      {isEndFocused && endLocationResults.length > 0 && (
-                        <FlatList
-                          data={endLocationResults}
-                          keyExtractor={(item) => item.placeId || item.description}
-                          renderItem={({ item }) => renderLocationItem(item, handleSelectEndLocation)}
-                          style={styles.locationResultsList}
-                          keyboardShouldPersistTaps="handled"
-                        />
-                      )}
-                    </View>
-                  </View>
-
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>
-                      Maximum Daily Drive Time: {maxDriveHours} hours
-                    </Text>
-                    <Slider
-                      style={styles.slider}
-                      minimumValue={2}
-                      maximumValue={10}
-                      step={0.5}
-                      value={maxDriveHours}
-                      onValueChange={setMaxDriveHours}
-                      minimumTrackTintColor={COLORS.primary}
-                      maximumTrackTintColor="#D8D8D8"
-                      thumbTintColor={COLORS.secondary}
-                      accessibilityLabel={`Maximum daily driving time, currently ${maxDriveHours} hours`}
-                    />
-                    <View style={styles.sliderLabels}>
-                      <Text style={styles.sliderLabel}>2h</Text>
-                      <Text style={styles.sliderLabel}>10h</Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {step === 2 && (
+              {currentStep === 2 && (
                 <View style={styles.formContainer}>
                   <Text style={styles.sectionTitle}>
                     What kind of scenery do you prefer?
@@ -756,24 +1065,28 @@ const RoutePlannerScreen = () => {
                 </View>
               )}
 
-              <TouchableOpacity
-                style={styles.nextButton}
-                onPress={handleNextStep}
-                disabled={isLoading}
-                accessible={true}
-                accessibilityLabel={step === 1 ? "Next Step" : "Calculate Route"}
-                accessibilityHint={step === 1 ? "Move to scenery preferences" : "Creates your route and saves the trip"}
-              >
-                <Text style={styles.nextButtonText}>
-                  {step === 1 ? 'Next Step' : 'Calculate Route'}
-                </Text>
-                <Ionicons 
-                  name={step === 1 ? "arrow-forward" : "checkmark-circle"} 
-                  size={20} 
-                  color="white" 
-                  style={styles.nextButtonIcon} 
-                />
-              </TouchableOpacity>
+              {currentStep === 3 && renderRouteReviewStep()}
+
+              {currentStep < 3 && (
+                <TouchableOpacity
+                  style={styles.nextButton}
+                  onPress={handleNextStep}
+                  disabled={isLoading}
+                  accessible={true}
+                  accessibilityLabel={currentStep === 1 ? "Next Step" : "Calculate Route"}
+                  accessibilityHint={currentStep === 1 ? "Move to scenery preferences" : "Creates your route and saves the trip"}
+                >
+                  <Text style={styles.nextButtonText}>
+                    {currentStep === 1 ? 'Next Step' : 'Calculate Route'}
+                  </Text>
+                  <Ionicons 
+                    name={currentStep === 1 ? "arrow-forward" : "checkmark-circle"} 
+                    size={20} 
+                    color="white" 
+                    style={styles.nextButtonIcon} 
+                  />
+                </TouchableOpacity>
+              )}
             </>
           )}
         </ScrollView>
@@ -806,11 +1119,6 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: 8,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: COLORS.primary,
-    fontWeight: '500',
   },
   errorContainer: {
     backgroundColor: '#FFEBEE',
@@ -987,6 +1295,173 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   nextButtonIcon: {
+    marginLeft: 8,
+  },
+  stepContainer: {
+    padding: 20,
+  },
+  stepTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    marginBottom: 10,
+  },
+  stepDescription: {
+    fontSize: 14,
+    color: COLORS.placeholder,
+    marginBottom: 20,
+  },
+  inputContainer: {
+    marginBottom: 20,
+  },
+  datePickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    height: 50,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  stopCard: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  stopHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  stopNumber: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  stopDate: {
+    fontSize: 14,
+    color: '#666',
+  },
+  stopAddress: {
+    fontSize: 15,
+    marginBottom: 10,
+  },
+  nightsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  nightsLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  nightsControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  nightsButton: {
+    backgroundColor: COLORS.primary,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  nightsValue: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  suggestionsList: {
+    position: 'absolute',
+    top: 48,
+    left: 0,
+    right: 0,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    maxHeight: 200,
+    zIndex: 20,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  planButton: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    height: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  disabledButton: {
+    backgroundColor: '#ccc',
+  },
+  stopsList: {
+    flex: 1,
+  },
+  sliderValue: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: COLORS.primary,
+    marginLeft: 4,
+  },
+  tripNameDisplay: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  stopActions: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  resortButton: {
+    backgroundColor: COLORS.secondary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  resortButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
     marginLeft: 8,
   },
 });

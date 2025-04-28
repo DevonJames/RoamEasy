@@ -38,12 +38,15 @@ const TripCard = ({ name, dateRange, onPress }: TripCardProps) => {
 const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const { trips, isLoading, error, loadTrips } = useTrips();
-  const { user, isGuest } = useAuth();
+  const { user, continueAsGuest } = useAuth();
 
   useEffect(() => {
     // Load trips when component mounts
     loadTrips();
   }, []);
+
+  // Determine if user is in guest mode (no user means they're in guest mode)
+  const isGuestMode = !user;
 
   const handleCreateNewTrip = () => {
     navigation.navigate('RoutePlanner');
@@ -51,6 +54,12 @@ const HomeScreen = () => {
 
   const handleTripPress = (tripId: string) => {
     navigation.navigate('ItineraryScreen', { tripId });
+  };
+
+  const handleTestLogin = () => {
+    // Login as test user with UUID that matches Supabase's expected format
+    continueAsGuest();
+    console.log('Logged in as test user');
   };
 
   const renderEmptyState = () => (
@@ -69,6 +78,19 @@ const HomeScreen = () => {
         </TouchableOpacity>
       </View>
 
+      {!user && (
+        <View style={styles.loginContainer}>
+          <TouchableOpacity 
+            style={styles.loginButton} 
+            onPress={handleTestLogin}
+            accessible={true}
+            accessibilityLabel="Login as Test User"
+          >
+            <Text style={styles.loginButtonText}>Login as Test User</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.createTripContainer}>
         <TouchableOpacity 
           style={styles.createTripButton} 
@@ -78,7 +100,7 @@ const HomeScreen = () => {
         >
           <Text style={styles.createTripButtonText}>Create New Trip</Text>
         </TouchableOpacity>
-        {isGuest && (
+        {isGuestMode && (
           <Text style={styles.guestModeText}>
             Note: In guest mode, you can create but not save trips. Sign in to unlock all features.
           </Text>
@@ -286,6 +308,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
+  },
+  loginContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  loginButton: {
+    backgroundColor: '#42A5F5', // Sky Blue from our palette
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  loginButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 

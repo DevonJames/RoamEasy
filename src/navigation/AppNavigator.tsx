@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp } from '@react-navigation/native';
+import { View, Text } from 'react-native';
 
 // Import actual screen components
 import HomeScreen from '../screens/HomeScreen';
@@ -103,26 +104,83 @@ const MainTabNavigator = () => {
 
 // Root Navigator
 const AppNavigator = () => {
-  const { isAuthenticated, isLoading, isGuest } = useAuth();
+  const { isAuthenticated, isLoading, isGuest, hasSignedUp } = useAuth();
   const [initialRoute, setInitialRoute] = useState<'Main' | 'AuthStack'>('AuthStack');
+  
+  // Keep track of authentication state changes for debugging
+  const [authStateLog, setAuthStateLog] = useState<string[]>([]);
+  
+  // Add refs to track previous auth state to prevent unnecessary navigation changes
+  const prevAuthState = useRef({ isAuthenticated, isGuest, hasSignedUp });
 
+  // Special effect for signup success
   useEffect(() => {
-    if (isAuthenticated || isGuest) {
+    if (hasSignedUp) {
+      console.log('🚨 DETECTED SIGNUP SUCCESS - FORCING NAVIGATION');
       setInitialRoute('Main');
-    } else {
-      setInitialRoute('AuthStack');
     }
-  }, [isAuthenticated, isGuest]);
+  }, [hasSignedUp]);
+
+  // This effect runs whenever auth state changes
+  useEffect(() => {
+    try {
+      // Only log and update when the authentication state actually changes meaningfully
+      const hasAuthStateChanged = 
+        prevAuthState.current.isAuthenticated !== isAuthenticated || 
+        prevAuthState.current.isGuest !== isGuest ||
+        prevAuthState.current.hasSignedUp !== hasSignedUp;
+      
+      // Always log auth state for debugging
+      const newLogEntry = `Auth state: ${isAuthenticated ? 'Authenticated' : 'Not authenticated'}, Guest: ${isGuest}, SignedUp: ${hasSignedUp}`;
+      console.log(newLogEntry);
+      setAuthStateLog(prev => [...prev, newLogEntry]);
+      
+      if (hasAuthStateChanged) {
+        console.log('IMPORTANT: Auth state changed:', { isAuthenticated, isGuest, hasSignedUp });
+        
+        // Only update route when state has actually changed
+        if (isAuthenticated || isGuest) {
+          console.log('Navigating to Main route');
+          setInitialRoute('Main');
+        } else {
+          console.log('Navigating to AuthStack route');
+          setInitialRoute('AuthStack');
+        }
+        
+        // Update the ref
+        prevAuthState.current = { isAuthenticated, isGuest, hasSignedUp };
+      }
+    } catch (error) {
+      console.error('Error in auth effect:', error);
+    }
+  }, [isAuthenticated, isGuest, hasSignedUp]);
+
+  console.log('Current route state:', { initialRoute, isAuthenticated, isGuest });
 
   if (isLoading) {
-    // Return a loading screen
-    return null;
+    // Return a simple loading component instead of null
+    return (
+      <NavigationContainer>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text>Loading...</Text>
+        </View>
+      </NavigationContainer>
+    );
+  }
+
+  // Default to AuthStack if we're not sure
+  const currentRoute = (isAuthenticated || isGuest) ? 'Main' : 'AuthStack';
+  
+  // Force initialRoute to match currentRoute for consistency
+  if (initialRoute !== currentRoute) {
+    console.log('Forcing route to match auth state:', currentRoute);
+    setInitialRoute(currentRoute);
   }
 
   return (
     <NavigationContainer>
       <MainStack.Navigator 
-        initialRouteName={initialRoute}
+        initialRouteName={currentRoute}
         screenOptions={{ headerShown: false }}
       >
         {(isAuthenticated || isGuest) ? (

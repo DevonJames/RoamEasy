@@ -7,8 +7,22 @@ import {
   TouchableOpacity, 
   Switch,
   TextInput,
-  SafeAreaView 
+  SafeAreaView,
+  Alert
 } from 'react-native';
+import { useNavigation, CommonActions } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import useAuth from '../hooks/useAuth';
+
+// Define navigation types to match AppNavigator
+type MainStackParamList = {
+  Main: undefined;
+  Itinerary: { tripId: string };
+  ResortDetails: { tripId: string, stopId: string };
+  AuthStack: undefined;
+};
+
+type SettingsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 // Mock user profile data
 const MOCK_USER = {
@@ -37,6 +51,9 @@ const MOCK_USER = {
 };
 
 const SettingsScreen = () => {
+  const navigation = useNavigation<SettingsScreenNavigationProp>();
+  const { signOut } = useAuth();
+  
   // State for user settings
   const [user, setUser] = useState(MOCK_USER);
   
@@ -67,9 +84,34 @@ const SettingsScreen = () => {
   };
   
   // Handle sign out
-  const handleSignOut = () => {
-    console.log('User signed out');
-    // In a real app, this would clear auth tokens and navigate to the auth screen
+  const handleSignOut = async () => {
+    try {
+      console.log('Signing out user...');
+      const result = await signOut();
+      
+      if (result.success) {
+        console.log('User successfully signed out');
+        
+        // Force navigation to the Auth stack
+        navigation.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [
+              { name: 'AuthStack' },
+            ],
+          })
+        );
+        
+        // Show confirmation to the user
+        Alert.alert('Signed Out', 'You have been successfully signed out');
+      } else {
+        console.error('Sign out failed:', result.error);
+        Alert.alert('Error', 'Failed to sign out. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error signing out:', error);
+      Alert.alert('Error', 'An unexpected error occurred while signing out.');
+    }
   };
   
   // Handle upgrade subscription

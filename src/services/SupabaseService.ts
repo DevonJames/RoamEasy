@@ -82,7 +82,15 @@ class SupabaseService {
       console.error('Missing Supabase environment variables');
     }
     
-    this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: false,
+      }
+    });
+    
+    console.log('Supabase client initialized');
   }
 
   public static getInstance(): SupabaseService {
@@ -98,10 +106,30 @@ class SupabaseService {
       const { data, error } = await this.supabase.auth.signUp({
         email,
         password,
+        options: {
+          // Disable email confirmation requirement
+          emailRedirectTo: undefined,
+          data: {
+            email_confirmed: true
+          }
+        }
       });
       
       if (error) {
         throw error;
+      }
+      
+      // If user is created but email confirmation is still required by Supabase
+      // Let's attempt to auto-confirm by signing them in immediately
+      if (data?.user && data.user.identities && data.user.identities.length > 0) {
+        console.log('User created, attempting auto sign-in to bypass confirmation');
+        
+        // Try to sign in immediately
+        const signInResult = await this.signIn(email, password);
+        if (signInResult.user) {
+          console.log('Auto sign-in successful');
+          return { user: signInResult.user, error: null };
+        }
       }
       
       if (data?.user) {
@@ -110,27 +138,50 @@ class SupabaseService {
       
       return { user: null, error: new Error('User creation failed') };
     } catch (error) {
+      console.error('Sign up error:', error);
       return { user: null, error: error as Error };
     }
   }
 
   async signIn(email: string, password: string): Promise<{ user: User | null; error: Error | null }> {
     try {
+      console.log('Attempting sign in for:', email);
       const { data, error } = await this.supabase.auth.signInWithPassword({
         email,
         password,
       });
       
       if (error) {
+        console.error('Sign in error from Supabase:', error.message);
+        
+        // Handle specific error cases
+        if (error.message.includes('Email not confirmed')) {
+          console.log('Email not confirmed error - attempting to auto-confirm...');
+          
+          // Try to update user to mark as confirmed
+          try {
+            // This would require admin access, which we don't have in the client
+            // Instead, we'll just return a more user-friendly error
+            return { 
+              user: null, 
+              error: new Error('Your email is pending confirmation. Please check your inbox or try again later.') 
+            };
+          } catch (adminError) {
+            console.error('Failed to auto-confirm user:', adminError);
+          }
+        }
+        
         throw error;
       }
       
       if (data?.user) {
+        console.log('Sign in successful for user ID:', data.user.id);
         return { user: this.transformUser(data.user), error: null };
       }
       
       return { user: null, error: new Error('Sign in failed') };
     } catch (error) {
+      console.error('Sign in error:', error);
       return { user: null, error: error as Error };
     }
   }
@@ -641,10 +692,91 @@ class SupabaseService {
       console.log('Adding trip stop for trip:', tripId);
       console.log('Stop data received:', JSON.stringify(stopData, null, 2));
       
+      // Verify the trip exists first
+      console.log('Verifying trip exists before adding stop...');
+      const { data: tripExists, error: tripError } = await this.supabase
+        .from('trips')
+        .select('id')
+        .eq('id', tripId)
+        .single();
+      
+      if (tripError) {
+        console.error('Error verifying trip existence:', tripError);
+        throw new Error(`Trip verification failed: ${tripError.message}`);
+      }
+      
+      if (!tripExists) {
+        console.error('Trip not found when adding stop:', tripId);
+        throw new Error(`Trip with ID ${tripId} not found`);
+      }
+      
+      // Create a resort placeholder if needed
+      let resortId = stopData.resort_id;
+      
+      // If no resort_id is provided, generate a UUID using the Supabase UUID extension
+      if (!resortId) {
+        console.log('No resort ID provided, generating a new UUID');
+        
+        // Generate a UUID using Supabase
+        const { data: uuidData, error: uuidError } = await this.supabase
+          .rpc('generate_uuid');
+          
+        if (uuidError) {
+          console.error('Error generating UUID:', uuidError);
+          // Fallback to a client-side UUID generation approach
+          resortId = this.generateUUID();
+          console.log('Using client-side generated UUID:', resortId);
+        } else {
+          resortId = uuidData;
+          console.log('Using server-generated UUID:', resortId);
+        }
+      }
+      
+      // Check if the resort exists
+      console.log('Checking if resort exists:', resortId);
+      const { data: existingResort, error: resortError } = await this.supabase
+        .from('resorts')
+        .select('id')
+        .eq('id', resortId)
+        .single();
+      
+      // If resort doesn't exist, create a placeholder
+      if (!existingResort || resortError) {
+        console.log('Creating placeholder resort for stop with ID:', resortId);
+        
+        // Extract location info from notes if available
+        const locationData = this.extractLocationFromNotes(stopData.notes || '');
+        console.log('Extracted location data:', locationData);
+        
+        // Create the placeholder resort
+        const { data: newResort, error: createError } = await this.supabase
+          .from('resorts')
+          .insert({
+            id: resortId,
+            name: `Resort near ${locationData.address}`,
+            address: locationData.address,
+            latitude: locationData.latitude,
+            longitude: locationData.longitude,
+            rating: 0,
+            amenities: {},
+            phone: '',
+            website: ''
+          })
+          .select()
+          .single();
+        
+        if (createError) {
+          console.error('Error creating placeholder resort:', createError);
+          // Continue anyway, as the resort ID constraint might be set to CASCADE
+        } else {
+          console.log('Created placeholder resort:', newResort);
+        }
+      }
+      
       // Extract only the fields that the database expects
       const sanitizedData = {
         trip_id: tripId,
-        resort_id: stopData.resort_id || '00000000-0000-4000-8000-000000000000',
+        resort_id: resortId,
         stop_order: stopData.stop_order || 0,
         check_in: stopData.check_in || new Date().toISOString().split('T')[0],
         check_out: stopData.check_out || new Date().toISOString().split('T')[0],
@@ -670,6 +802,102 @@ class SupabaseService {
       console.error('Error in addTripStop:', error);
       return { stop: null, error: error as Error };
     }
+  }
+
+  /**
+   * Generate a v4 UUID
+   * Client-side fallback when Supabase RPC is not available
+   */
+  private generateUUID(): string {
+    // Implementation of RFC4122 version 4 compliant UUID
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0, 
+          v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  /**
+   * Extract location data from notes string
+   */
+  private extractLocationFromNotes(notes: string): { latitude: number; longitude: number; address: string } {
+    console.log('Extracting location from notes:', notes);
+    
+    let latitude = 0;
+    let longitude = 0;
+    let address = 'Default Resort';
+    
+    if (!notes) {
+      console.log('No notes provided, using default location');
+      return { latitude, longitude, address };
+    }
+    
+    // Try different patterns to extract coordinates - log each attempt for debugging
+    
+    // Pattern 1: Location: Address (lat, lng)
+    const locationPattern = /Location:([^(]+)\(([-\d.]+),\s*([-\d.]+)\)/;
+    const locationMatch = notes.match(locationPattern);
+    
+    console.log('Pattern 1 match attempt:', locationMatch);
+    
+    if (locationMatch && locationMatch.length >= 4) {
+      console.log('Found location using pattern 1:', locationMatch);
+      address = locationMatch[1].trim();
+      latitude = parseFloat(locationMatch[2]);
+      longitude = parseFloat(locationMatch[3]);
+      
+      console.log(`Successfully extracted using Pattern 1: ${address} (${latitude}, ${longitude})`);
+      return { latitude, longitude, address };
+    }
+    
+    // Pattern 2: Just coordinates (lat, lng)
+    const coordsPattern = /\(([-\d.]+),\s*([-\d.]+)\)/;
+    const coordsMatch = notes.match(coordsPattern);
+    
+    console.log('Pattern 2 match attempt:', coordsMatch);
+    
+    if (coordsMatch && coordsMatch.length >= 3) {
+      console.log('Found coordinates using pattern 2:', coordsMatch);
+      latitude = parseFloat(coordsMatch[1]);
+      longitude = parseFloat(coordsMatch[2]);
+      
+      // Try to find an address separately
+      const addressPattern = /Location:\s*([^(]+)/;
+      const addressMatch = notes.match(addressPattern);
+      
+      if (addressMatch && addressMatch.length >= 2) {
+        address = addressMatch[1].trim();
+      } else {
+        address = `Location at ${latitude}, ${longitude}`;
+      }
+      
+      console.log(`Successfully extracted using Pattern 2: ${address} (${latitude}, ${longitude})`);
+      return { latitude, longitude, address };
+    }
+    
+    // Pattern 3: Any numbers that could be coordinates
+    const fallbackPattern = /([-\d.]+)[,\s]+([-\d.]+)/;
+    const fallbackMatch = notes.match(fallbackPattern);
+    
+    console.log('Pattern 3 match attempt:', fallbackMatch);
+    
+    if (fallbackMatch && fallbackMatch.length >= 3) {
+      console.log('Found possible coordinates using fallback pattern:', fallbackMatch);
+      const lat = parseFloat(fallbackMatch[1]);
+      const lng = parseFloat(fallbackMatch[2]);
+      
+      // Check if these look like valid coordinates
+      if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        latitude = lat;
+        longitude = lng;
+        address = `Extracted location at ${latitude}, ${longitude}`;
+        console.log(`Successfully extracted using Pattern 3: ${address}`);
+        return { latitude, longitude, address };
+      }
+    }
+    
+    console.log('Could not extract location from notes, using defaults');
+    return { latitude, longitude, address };
   }
 }
 

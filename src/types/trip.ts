@@ -1,9 +1,20 @@
 export interface Trip {
   id: string;
   userId: string;
+  user_id?: string; // For compatibility with backend
   name: string;
-  startDate: string; // ISO date string
-  endDate: string; // ISO date string
+  startDate?: string; // ISO date string
+  endDate?: string; // ISO date string
+  start_location?: {
+    address: string;
+    latitude: number;
+    longitude: number;
+  };
+  end_location?: {
+    address: string;
+    latitude: number;
+    longitude: number;
+  };
   status: 'draft' | 'planned' | 'completed' | 'cancelled';
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
@@ -14,6 +25,7 @@ export interface TripStop {
   id: string;
   tripId: string;
   resortId?: string;
+  resort_id?: string;
   stopOrder: number;
   checkIn: string; // ISO date string
   checkOut: string; // ISO date string
