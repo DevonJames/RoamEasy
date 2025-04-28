@@ -267,7 +267,7 @@ class SupabaseService {
         .from('trips')
         .select(`
           *,
-          trip_stops (*)
+          trip_stops(*)
         `)
         .eq('id', tripId)
         .single();
@@ -282,10 +282,25 @@ class SupabaseService {
         return { trip: null, error: null };
       }
       
+      // Get the stops separately to ensure we have them
+      const { data: stopData, error: stopError } = await this.supabase
+        .from('trip_stops')
+        .select('*')
+        .eq('trip_id', tripId)
+        .order('stop_order', { ascending: true });
+        
+      if (stopError) {
+        console.error('Error fetching trip stops:', stopError);
+      }
+      
+      // Use stops from the direct query if available
+      const stops = stopData || [];
+      console.log(`Found ${stops.length} stops for trip ${tripId} from direct query`);
+      
       // Transform the result to match our Trip interface
       const trip = {
         ...data,
-        stops: data.trip_stops || []
+        stops: stops // Use the directly queried stops
       } as Trip;
       
       console.log('Trip retrieved successfully with', trip.stops?.length || 0, 'stops');

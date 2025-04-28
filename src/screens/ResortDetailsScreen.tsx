@@ -16,10 +16,9 @@ import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import useMaps from '../hooks/useMaps';
 import useTrips, { TripStop, Resort, Trip } from '../hooks/useTrips';
-import { AppStackParamList } from '../navigation/AppNavigator';
-import { Ionicons } from '@expo/vector-icons';
-import Card from '../components/Card';
 import { COLORS } from '../constants/theme';
+import Card from '../components/Card';
+import { Ionicons } from '@expo/vector-icons';
 
 // Define navigation types
 type RootStackParamList = {
@@ -31,8 +30,8 @@ type RootStackParamList = {
   OfflineTrips: undefined;
 };
 
-// Update TripStop interface if needed
-interface EnhancedTripStop extends TripStop {
+// Update TripStop interface for the screen
+interface EnhancedTripStop extends Omit<TripStop, 'resort_id'> {
   location?: {
     latitude: number;
     longitude: number;
@@ -60,6 +59,17 @@ const ResortDetailsScreen = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Component setup
+  useEffect(() => {
+    console.log("ResortDetailsScreen mounted with params:", {
+      tripId,
+      stopId
+    });
+    return () => {
+      console.log("ResortDetailsScreen unmounting");
+    };
+  }, []);
+
   // Load trip and stop data
   useEffect(() => {
     const loadData = async () => {
@@ -67,31 +77,135 @@ const ResortDetailsScreen = () => {
       setError(null);
       
       try {
+        console.log(`Loading data for tripId: ${tripId}, stopId: ${stopId}`);
+        
         if (!tripId || !stopId) {
           throw new Error('Trip ID or Stop ID is missing');
         }
 
+        console.log("Fetching trip data...");
         const trip = await getTrip(tripId);
         
         if (!trip) {
+          console.error("Trip not found:", tripId);
           throw new Error('Trip not found');
         }
         
-        setCurrentTrip(trip);
+        console.log(`Trip found with ${trip.stops?.length || 0} stops`);
         
-        // Find the current stop
-        const stop = trip.stops.find((s: TripStop) => s.id === stopId) as EnhancedTripStop;
+        if (trip.stops) {
+          // Log all stop IDs for debugging
+          console.log("All stop IDs in trip:", trip.stops.map(s => `${s.id} (order: ${(s as any).stop_order})`));
+        }
+        
+        // Find the current stop - try by ID first
+        let stop = trip.stops?.find((s) => s.id === stopId);
+        
+        // If not found by ID, try by stop_order (if stopId can be parsed as a number)
+        if (!stop && !isNaN(parseInt(stopId))) {
+          const stopOrder = parseInt(stopId);
+          console.log("Trying to find stop by order:", stopOrder);
+          stop = trip.stops?.find((s) => (s as any).stop_order === stopOrder);
+        }
         
         if (!stop) {
+          console.error("Stop not found in trip:", stopId);
+          if (trip.stops) {
+            console.log("Available stops:", trip.stops.map(s => `${s.id} (order: ${(s as any).stop_order})`).join(", "));
+          }
           throw new Error('Stop not found');
         }
         
-        setCurrentStop(stop);
+        console.log("Found stop:", JSON.stringify(stop, null, 2));
         
-        // Load resort suggestions for this stop
-        await loadResortSuggestions(stop);
+        // Define a typed variable to hold the enhanced stop
+        let enhancedStop: EnhancedTripStop = { ...stop } as EnhancedTripStop;
+        
+        // Check if the stop already has location data directly available
+        if (stop && 'location' in stop && stop.location) {
+          console.log("Stop has direct location data:", stop.location);
+          enhancedStop.location = {
+            latitude: (stop.location as any).latitude,
+            longitude: (stop.location as any).longitude,
+            address: (stop.location as any).address || "Unknown location"
+          };
+        } 
+        // If not, try to extract it from notes
+        else if (stop.notes) {
+          console.log("Attempting to extract location from notes:", stop.notes);
+          
+          // Dump all stop data for debugging
+          console.log("Complete stop data:", JSON.stringify(stop, null, 2));
+          
+          // Try to extract coordinates using a more flexible regex
+          const coordinateMatch = stop.notes.match(/\(([-\d.]+),\s*([-\d.]+)\)/g);
+          console.log("Coordinate matches:", coordinateMatch);
+          
+          if (coordinateMatch && coordinateMatch.length > 0) {
+            // Extract the last coordinates (most likely to be the destination for this stop)
+            const lastCoordinateStr = coordinateMatch[coordinateMatch.length - 1];
+            const coords = lastCoordinateStr.match(/\(([-\d.]+),\s*([-\d.]+)\)/);
+            
+            if (coords && coords.length >= 3) {
+              const latitude = parseFloat(coords[1]);
+              const longitude = parseFloat(coords[2]);
+              
+              // Find all Location: entries
+              const locationEntries = stop.notes.match(/Location:([^(]+)\([^)]+\)/g);
+              console.log("Location entries:", locationEntries);
+              
+              let address = "Unknown location";
+              
+              if (locationEntries && locationEntries.length > 0) {
+                // Get the last location entry (corresponding to the last coordinates)
+                const lastLocationEntry = locationEntries[locationEntries.length - 1];
+                const addressMatch = lastLocationEntry.match(/Location:([^(]+)/);
+                
+                if (addressMatch && addressMatch.length >= 2) {
+                  address = addressMatch[1].trim();
+                }
+              }
+              
+              console.log(`Successfully extracted location: ${address} (${latitude}, ${longitude})`);
+              
+              enhancedStop.location = {
+                latitude,
+                longitude,
+                address
+              };
+            }
+          } else {
+            console.error("Failed to extract coordinates from notes");
+            // Fall back to using a very permissive pattern that looks for any numbers that could be coordinates
+            const fallbackMatch = stop.notes.match(/([-\d.]+)[,\s]+([-\d.]+)/);
+            console.log("Fallback match:", fallbackMatch);
+            
+            if (fallbackMatch && fallbackMatch.length >= 3) {
+              const latitude = parseFloat(fallbackMatch[1]);
+              const longitude = parseFloat(fallbackMatch[2]);
+              console.log(`Using fallback coordinates: (${latitude}, ${longitude})`);
+              
+              enhancedStop.location = {
+                latitude,
+                longitude,
+                address: "Extracted location"
+              };
+            } else {
+              throw new Error('Could not extract location data from notes');
+            }
+          }
+        } else {
+          throw new Error('Stop has no location or notes data');
+        }
+        
+        console.log("Final enhanced stop with location:", enhancedStop);
+        setCurrentStop(enhancedStop);
+        
+        // Load resort suggestions based on the location
+        await loadResortSuggestions(enhancedStop);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'An error occurred loading trip data';
+        console.error("Error in loadData:", errorMessage);
         setError(errorMessage);
       } finally {
         setIsLoading(false);
@@ -104,18 +218,32 @@ const ResortDetailsScreen = () => {
   // Load resort suggestions
   const loadResortSuggestions = async (stop: EnhancedTripStop) => {
     try {
-      if (!currentTrip) return;
-      
-      // Check if stop already has a selected resort
-      if (stop.resort_id) {
-        setSelectedResort(stop.resort || null);
+      if (!currentTrip) {
+        console.error("No current trip available");
+        return;
       }
       
+      // Check if stop already has a selected resort
+      if (stop.resort_id && stop.resort) {
+        console.log("Stop already has selected resort:", stop.resort);
+        setSelectedResort(stop.resort);
+      }
+      
+      // Make sure we have location data to work with
+      if (!stop.location) {
+        console.error("Stop has no location data:", stop);
+        throw new Error('Cannot load resort suggestions without location data');
+      }
+      
+      console.log("Getting resort suggestions for location:", stop.location);
+      
       // Get resort suggestions based on the stop location and user preferences
-      const location = stop.location || { 
-        latitude: 0, 
-        longitude: 0,
-        address: ''
+      const location = {
+        coordinates: {
+          latitude: stop.location.latitude,
+          longitude: stop.location.longitude,
+        },
+        address: stop.location.address || '',
       };
       
       const preferences = {
@@ -123,15 +251,42 @@ const ResortDetailsScreen = () => {
         maxPricePerNight: 100
       };
       
+      console.log("Calling getResortSuggestions with location:", location);
       const result = await getResortSuggestions(location, preferences);
       
-      if (result.success && result.resorts) {
-        setResorts(result.resorts);
+      if (result.success && result.resorts && result.resorts.length > 0) {
+        console.log(`Found ${result.resorts.length} resort suggestions`);
+        
+        // Convert Location to Resort format
+        const resortData = result.resorts.map((loc, index) => ({
+          id: `resort-${index}-${Date.now()}`,
+          name: loc.address.split(',')[0] || `Resort ${index + 1}`,
+          address: loc.address,
+          latitude: loc.coordinates.latitude,
+          longitude: loc.coordinates.longitude,
+          rating: 4.0 + Math.random(), // Placeholder rating
+          amenities: ['WiFi', 'Full Hookups', 'Pet Friendly'],
+          nightly_rate: 50 + Math.floor(Math.random() * 100), // Random price
+          phone: '1-800-555-0000',
+          website: 'https://example.com',
+          last_updated: new Date().toISOString()
+        }));
+        
+        console.log("Setting resort data:", resortData.length);
+        setResorts(resortData);
       } else {
-        throw new Error(result.error?.message || 'Failed to get resort suggestions');
+        console.error("Resort suggestion API error or no resorts found:", result.error || "No resorts returned");
+        
+        // Show a more specific error message
+        if (result.error && result.error.message === 'No resorts found in this location') {
+          setError("No RV parks or campgrounds were found near this location. Try adjusting the location or searching manually.");
+        } else {
+          setError(result.error?.message || 'Failed to get resort suggestions. Try again later.');
+        }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An error occurred loading resort suggestions';
+      console.error("Error in loadResortSuggestions:", errorMessage);
       setError(errorMessage);
     }
   };
@@ -183,10 +338,10 @@ const ResortDetailsScreen = () => {
     const isSelected = selectedResort?.id === item.id;
     
     return (
-      <Card style={[styles.resortCard, isSelected ? styles.selectedCard : null]}>
-        {item.imageUrl && (
+      <Card style={[styles.resortCard, isSelected ? styles.selectedCard : {}]}>
+        {item.image_url && (
           <Image 
-            source={{ uri: item.imageUrl }} 
+            source={{ uri: item.image_url }} 
             style={styles.resortImage} 
             resizeMode="cover"
           />
@@ -200,7 +355,7 @@ const ResortDetailsScreen = () => {
             <Text style={styles.rating}>{item.rating.toFixed(1)}</Text>
           </View>
           
-          <Text style={styles.price}>${item.pricePerNight || item.nightly_rate}/night</Text>
+          <Text style={styles.price}>${item.nightly_rate}/night</Text>
           
           <Text style={styles.amenities}>
             {Array.isArray(item.amenities) 
@@ -212,10 +367,10 @@ const ResortDetailsScreen = () => {
           
           <View style={styles.buttonContainer}>
             <TouchableOpacity 
-              style={[styles.button, styles.selectButton, isSelected ? styles.selectedButton : null]} 
+              style={[styles.button, styles.selectButton, isSelected ? styles.selectedButton : {}]} 
               onPress={() => handleSelectResort(item)}
             >
-              <Text style={[styles.buttonText, isSelected ? styles.selectedButtonText : null]}>
+              <Text style={[styles.buttonText, isSelected ? styles.selectedButtonText : {}]}>
                 {isSelected ? 'Selected' : 'Select'}
               </Text>
             </TouchableOpacity>
@@ -248,16 +403,45 @@ const ResortDetailsScreen = () => {
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle-outline" size={48} color={COLORS.error} />
-          <Text style={styles.errorText}>{error}</Text>
+        <View style={styles.header}>
           <TouchableOpacity 
-            style={styles.retryButton}
             onPress={() => navigation.goBack()}
+            style={styles.backButton}
             accessible={true}
             accessibilityLabel="Go back to itinerary"
           >
-            <Text style={styles.retryButtonText}>Go Back</Text>
+            <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Resort Options</Text>
+        </View>
+        
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => {
+              setError(null);
+              setIsLoading(true);
+              if (currentStop) {
+                loadResortSuggestions(currentStop);
+              }
+            }}
+          >
+            <Text style={styles.actionButtonText}>Try Again</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.secondaryButton]}
+            onPress={() => {
+              // Open web browser to search for RV parks
+              const searchQuery = currentStop?.location?.address
+                ? `RV parks near ${currentStop.location.address}`
+                : 'RV parks';
+              Linking.openURL(`https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`);
+            }}
+          >
+            <Text style={styles.secondaryButtonText}>Search on Google</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -335,24 +519,38 @@ const styles = StyleSheet.create({
   },
   errorContainer: {
     flex: 1,
+    padding: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
   },
   errorText: {
     fontSize: 16,
-    color: COLORS.error,
+    color: 'red',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
   },
-  retryButton: {
+  actionButton: {
     backgroundColor: COLORS.primary,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 5,
+    marginVertical: 10,
+    width: '80%',
+    alignItems: 'center',
   },
-  retryButtonText: {
+  actionButtonText: {
     color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  secondaryButton: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  secondaryButtonText: {
+    color: COLORS.primary,
+    fontSize: 16,
     fontWeight: 'bold',
   },
   noResultsContainer: {
@@ -446,6 +644,15 @@ const styles = StyleSheet.create({
   },
   selectedButtonText: {
     color: COLORS.primary,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+    marginLeft: 16,
   },
 });
 

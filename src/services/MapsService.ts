@@ -815,6 +815,50 @@ class MapsService {
       throw error;
     }
   }
+
+  // Add searchNearbyPlaces method to find RV parks and campgrounds near a location
+  async searchNearbyPlaces(location: Coordinates, radius: number = 50000, type: string = 'rv_park'): Promise<{ places: any[] | null; error: Error | null }> {
+    try {
+      // Construct a cache key
+      const cacheKey = `nearby:${location.latitude},${location.longitude}:${radius}:${type}`;
+      
+      // Try to get from cache first
+      const cachedResults = await MapsOfflineCache.getCachedSearchResults(cacheKey);
+      if (cachedResults) {
+        console.log(`Found ${cachedResults.length} cached places near ${location.latitude},${location.longitude}`);
+        return { places: cachedResults, error: null };
+      }
+
+      console.log(`Searching for ${type} near ${location.latitude},${location.longitude} within ${radius}m`);
+      
+      // Use Google Places Nearby Search API
+      const response = await axios.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', {
+        params: {
+          location: `${location.latitude},${location.longitude}`,
+          radius: radius,
+          type: type,
+          keyword: 'rv park campground camping',
+          key: GOOGLE_MAPS_API_KEY
+        }
+      });
+
+      if (response.data.status !== 'OK' && response.data.status !== 'ZERO_RESULTS') {
+        console.error('Nearby places search failed:', response.data.status, response.data.error_message);
+        throw new Error(`Nearby places search failed: ${response.data.status}`);
+      }
+
+      const places = response.data.results || [];
+      console.log(`Found ${places.length} places near ${location.latitude},${location.longitude}`);
+      
+      // Cache results
+      await MapsOfflineCache.cacheSearchResults(cacheKey, places);
+
+      return { places, error: null };
+    } catch (error) {
+      console.error('Nearby places search error:', error);
+      return { places: null, error: error as Error };
+    }
+  }
 }
 
 // Export singleton instance

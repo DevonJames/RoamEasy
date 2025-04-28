@@ -38,8 +38,34 @@ class OfflineService {
    */
   async cacheTrip(trip: Trip): Promise<void> {
     try {
+      console.log(`Caching trip ${trip.id} with ${trip.stops?.length || 0} stops`);
+      
+      // Ensure the trip has a stops array (could be in trip_stops from Supabase)
+      const enhancedTrip = {
+        ...trip,
+        stops: trip.stops || (trip as any).trip_stops || []
+      };
+      
+      // Remove trip_stops to avoid duplication
+      if ('trip_stops' in enhancedTrip) {
+        delete (enhancedTrip as any).trip_stops;
+      }
+      
+      console.log(`Enhanced trip has ${enhancedTrip.stops?.length || 0} stops for caching`);
+      
+      // Cache each stop individually
+      if (enhancedTrip.stops && enhancedTrip.stops.length > 0) {
+        console.log(`Individually caching ${enhancedTrip.stops.length} stops for trip ${trip.id}`);
+        for (const stop of enhancedTrip.stops) {
+          await this.cacheStop(stop);
+        }
+      }
+      
+      // Cache the whole trip
       const key = `${TRIP_PREFIX}${trip.id}`;
-      await AsyncStorage.setItem(key, JSON.stringify(trip));
+      await AsyncStorage.setItem(key, JSON.stringify(enhancedTrip));
+      
+      console.log(`Successfully cached trip ${trip.id} with ${enhancedTrip.stops?.length || 0} stops`);
     } catch (error) {
       console.error('Error caching trip:', error);
       throw new Error('Failed to cache trip');
@@ -145,9 +171,27 @@ class OfflineService {
       }
       
       const tripData = await AsyncStorage.multiGet(tripKeys);
-      return tripData
+      const trips = tripData
         .map(([_, value]) => (value ? JSON.parse(value) : null))
         .filter((trip): trip is Trip => trip !== null);
+        
+      console.log(`Retrieved ${trips.length} cached trips`);
+      
+      // Make sure each trip has a valid stops array
+      return trips.map(trip => {
+        // Ensure the trip has stops
+        const enhancedTrip = {
+          ...trip,
+          stops: trip.stops || (trip as any).trip_stops || []
+        };
+        
+        // Remove trip_stops to avoid duplication
+        if ('trip_stops' in enhancedTrip) {
+          delete (enhancedTrip as any).trip_stops;
+        }
+        
+        return enhancedTrip;
+      });
     } catch (error) {
       console.error('Error getting cached trips:', error);
       throw new Error('Failed to get cached trips');
@@ -165,13 +209,219 @@ class OfflineService {
       const tripData = await AsyncStorage.getItem(key);
       
       if (!tripData) {
+        console.log(`No cached trip found for ID: ${tripId}`);
         return null;
       }
       
-      return JSON.parse(tripData) as Trip;
+      const trip = JSON.parse(tripData) as Trip;
+      
+      // Ensure the trip has a valid stops array
+      const enhancedTrip = {
+        ...trip,
+        stops: trip.stops || (trip as any).trip_stops || []
+      };
+      
+      // Remove trip_stops to avoid duplication
+      if ('trip_stops' in enhancedTrip) {
+        delete (enhancedTrip as any).trip_stops;
+      }
+      
+      // Look for individually cached stops for this trip
+      const keys = await AsyncStorage.getAllKeys();
+      const stopKeys = keys.filter(key => key.startsWith('tripStop_'));
+      
+      if (stopKeys.length > 0) {
+        // Get all cached stops
+        const stopsData = await AsyncStorage.multiGet(stopKeys);
+        const stops = stopsData
+          .map(([_, value]) => (value ? JSON.parse(value) : null))
+          .filter(stop => stop !== null);
+        
+        // Filter stops for this trip and add any that aren't already in the stops array
+        const tripStops = stops.filter(stop => stop.trip_id === tripId);
+        
+        if (tripStops.length > 0) {
+          console.log(`Found ${tripStops.length} individually cached stops for trip ${tripId}`);
+          
+          // Get existing stop IDs
+          const existingStopIds = new Set(enhancedTrip.stops.map(stop => stop.id));
+          
+          // Add stops that aren't already in the array
+          for (const stop of tripStops) {
+            if (!existingStopIds.has(stop.id)) {
+              enhancedTrip.stops.push(stop);
+              console.log(`Added missing stop ${stop.id} to trip ${tripId}`);
+            }
+          }
+          
+          // Re-sort stops by stop_order if available
+          if (enhancedTrip.stops.length > 0) {
+            // Check if we have stops with stopOrder or stop_order
+            if ('stopOrder' in enhancedTrip.stops[0]) {
+              enhancedTrip.stops.sort((a, b) => a.stopOrder - b.stopOrder);
+            } else if ('stop_order' in enhancedTrip.stops[0]) {
+              enhancedTrip.stops.sort((a: any, b: any) => a.stop_order - b.stop_order);
+            }
+          }
+        }
+      }
+      
+      console.log(`Retrieved cached trip ${tripId} with ${enhancedTrip.stops?.length || 0} stops`);
+      
+      return enhancedTrip;
     } catch (error) {
       console.error('Error getting cached trip:', error);
       throw new Error('Failed to get cached trip');
+    }
+  }
+
+  /**
+   * Queue an item for sync when online
+   * @param action - Action type ('trip', 'stop', 'delete', 'reorder')
+   * @param data - Data to sync
+   */
+  async queueForSync(action: string, data: any): Promise<void> {
+    try {
+      // Get current sync queue
+      const queueData = await AsyncStorage.getItem('sync_queue');
+      const queue = queueData ? JSON.parse(queueData) : [];
+      
+      // Add item to queue
+      queue.push({
+        action,
+        data,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Save updated queue
+      await AsyncStorage.setItem('sync_queue', JSON.stringify(queue));
+      console.log(`Queued ${action} for sync: `, data);
+    } catch (error) {
+      console.error('Error queuing for sync:', error);
+      throw new Error('Failed to queue for sync');
+    }
+  }
+
+  /**
+   * Remove a trip from offline storage 
+   * @param tripId - ID of the trip to remove
+   */
+  async removeTrip(tripId: string): Promise<void> {
+    try {
+      console.log(`Removing trip ${tripId} from offline storage`);
+      
+      // Same implementation as clearTripCache
+      // Get the trip to find associated resort IDs and map regions
+      const trip = await this.getCachedTrip(tripId);
+      
+      if (!trip) {
+        console.log(`No trip found with ID: ${tripId}`);
+        return;
+      }
+      
+      // 1. Clear the trip itself
+      const tripKey = `${TRIP_PREFIX}${tripId}`;
+      await AsyncStorage.removeItem(tripKey);
+      
+      // 2. Clear all associated stops
+      if (trip.stops && trip.stops.length > 0) {
+        console.log(`Removing ${trip.stops.length} stops for trip ${tripId}`);
+        
+        for (const stop of trip.stops) {
+          const stopKey = `tripStop_${stop.id}`;
+          await AsyncStorage.removeItem(stopKey);
+        }
+        
+        // Also remove resort data if needed
+        const resortIds = trip.stops
+          .filter(stop => stop.resortId)
+          .map(stop => stop.resortId);
+          
+        if (resortIds.length > 0) {
+          const resortKeys = resortIds.map(id => `${RESORT_PREFIX}${id}`);
+          
+          for (const key of resortKeys) {
+            await AsyncStorage.removeItem(key);
+          }
+        }
+      }
+      
+      console.log(`Successfully removed trip ${tripId} from offline storage`);
+    } catch (error) {
+      console.error('Error removing trip:', error);
+      throw new Error('Failed to remove trip');
+    }
+  }
+
+  /**
+   * Process the sync queue
+   * @param supabaseService - Supabase service to use for syncing
+   */
+  async processSyncQueue(supabaseService: any): Promise<{ processed: number; errors: number }> {
+    if (!this.isConnected) {
+      return { processed: 0, errors: 0 };
+    }
+    
+    try {
+      // Get current sync queue
+      const queueData = await AsyncStorage.getItem('sync_queue');
+      if (!queueData) {
+        return { processed: 0, errors: 0 };
+      }
+      
+      const queue = JSON.parse(queueData);
+      let processed = 0;
+      let errors = 0;
+      
+      // Process each item
+      for (const item of queue) {
+        try {
+          switch (item.action) {
+            case 'trip':
+              await supabaseService.createTrip(item.data);
+              break;
+            case 'stop':
+              if (item.data.trip_id) {
+                await supabaseService.addTripStop(item.data.trip_id, item.data);
+              }
+              break;
+            case 'delete':
+              if (item.data.entity === 'trip') {
+                await supabaseService.deleteTrip(item.data.id);
+              } else if (item.data.entity === 'stop') {
+                await supabaseService.deleteTripStop(item.data.id);
+              }
+              break;
+            case 'reorder':
+              if (item.data.entity === 'trip_stops') {
+                for (const orderItem of item.data.order) {
+                  await supabaseService.updateTripStop(orderItem.id, { 
+                    stop_order: orderItem.stop_order || orderItem.stopOrder 
+                  });
+                }
+              }
+              break;
+          }
+          processed++;
+        } catch (error) {
+          console.error(`Error processing sync item ${item.action}:`, error);
+          errors++;
+        }
+      }
+      
+      // Clear the queue if everything was processed
+      if (errors === 0) {
+        await AsyncStorage.removeItem('sync_queue');
+      } else {
+        // Keep only failed items
+        const failedItems = queue.slice(processed);
+        await AsyncStorage.setItem('sync_queue', JSON.stringify(failedItems));
+      }
+      
+      return { processed, errors };
+    } catch (error) {
+      console.error('Error processing sync queue:', error);
+      throw new Error('Failed to process sync queue');
     }
   }
 

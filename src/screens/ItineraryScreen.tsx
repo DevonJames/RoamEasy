@@ -22,7 +22,7 @@ type RootStackParamList = {
   Home: undefined;
   RoutePlanner: undefined;
   ItineraryScreen: { tripId: string };
-  ResortDetailsScreen: { tripId: string, stopId: string };
+  ResortDetails: { tripId: string, stopId: string };
   Settings: undefined;
   OfflineTrips: undefined;
 };
@@ -50,9 +50,11 @@ const ItineraryScreen = () => {
           console.log('ItineraryScreen: Trip has', loadedTrip.stops?.length || 0, 'stops');
           
           // Check for the trip_stops field (from Supabase nested query)
-          if (loadedTrip.trip_stops && loadedTrip.trip_stops.length > 0) {
-            console.log('ItineraryScreen: Found trip_stops:', loadedTrip.trip_stops.length);
-            console.log('ItineraryScreen: Trip stops data:', JSON.stringify(loadedTrip.trip_stops, null, 2));
+          // Using type assertion since trip_stops is defined in the backend response
+          const tripWithStops = loadedTrip as Trip & { trip_stops?: TripStop[] };
+          if (tripWithStops.trip_stops && tripWithStops.trip_stops.length > 0) {
+            console.log('ItineraryScreen: Found trip_stops:', tripWithStops.trip_stops.length);
+            console.log('ItineraryScreen: Trip stops data:', JSON.stringify(tripWithStops.trip_stops, null, 2));
             
             // Copy trip_stops to stops if stops is empty
             if (!loadedTrip.stops || loadedTrip.stops.length === 0) {
@@ -60,7 +62,7 @@ const ItineraryScreen = () => {
               
               // Update currentTrip in the state to include stops from trip_stops
               updateTrip(loadedTrip.id, {
-                stops: loadedTrip.trip_stops
+                stops: tripWithStops.trip_stops
               });
             }
           } else {
@@ -99,7 +101,7 @@ const ItineraryScreen = () => {
       const newOrder = [...currentTrip.stops].map((stop, i) => ({
         id: stop.id,
         stop_order: i === fromIndex ? toIndex : 
-                    i === toIndex ? fromIndex : i
+                  i === toIndex ? fromIndex : i
       }));
       
       await reorderTripStops(currentTrip.id, newOrder);
@@ -180,7 +182,7 @@ const ItineraryScreen = () => {
   // Navigation to resort details
   const navigateToResortDetails = (stopId: string) => {
     if (!currentTrip) return;
-    navigation.navigate('ResortDetailsScreen', { tripId: currentTrip.id, stopId });
+    navigation.navigate('ResortDetails', { tripId: currentTrip.id, stopId });
   };
 
   // Render the header with action buttons
@@ -351,8 +353,9 @@ const ItineraryScreen = () => {
   }
 
   // Empty stops state
-  if (!currentTrip?.stops && !currentTrip?.trip_stops || 
-      (currentTrip?.stops?.length === 0 && (!currentTrip?.trip_stops || currentTrip?.trip_stops?.length === 0))) {
+  const tripWithStops = currentTrip as (Trip & { trip_stops?: TripStop[] }) | null;
+  if (!currentTrip?.stops && !tripWithStops?.trip_stops || 
+      (currentTrip?.stops?.length === 0 && (!tripWithStops?.trip_stops || tripWithStops?.trip_stops?.length === 0))) {
     return (
       <SafeAreaView style={styles.container}>
         {renderHeader()}
@@ -373,13 +376,21 @@ const ItineraryScreen = () => {
 
   // Use trip_stops if stops is empty
   const displayStops = currentTrip?.stops?.length ? currentTrip.stops : 
-    (currentTrip?.trip_stops || []);
+    (tripWithStops?.trip_stops || []);
 
   return (
     <SafeAreaView style={styles.container}>
       {renderHeader()}
       <FlatList
-        data={displayStops.sort((a, b) => a.stop_order - b.stop_order)}
+        data={displayStops.sort((a, b) => {
+          // Check for either property name
+          if ('stopOrder' in a && 'stopOrder' in b) {
+            return (a as any).stopOrder - (b as any).stopOrder;
+          } else if ('stop_order' in a && 'stop_order' in b) {
+            return (a as any).stop_order - (b as any).stop_order;
+          }
+          return 0;
+        })}
         keyExtractor={item => item.id}
         renderItem={renderStopItem}
         contentContainerStyle={styles.listContent}

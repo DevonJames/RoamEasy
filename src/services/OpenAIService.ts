@@ -427,8 +427,12 @@ Format your response as a JSON object with an array of suggestions in the follow
   
   // Helper method to divide a route into segments
   private divideRouteIntoSegments(route: RouteResult, numberOfSegments: number): RouteSegment[] {
+    console.log(`Dividing route into ${numberOfSegments} segments`);
+    
     const totalDuration = route.totalDuration;
     const durationPerSegment = totalDuration / numberOfSegments;
+    
+    console.log(`Total duration: ${totalDuration}s, Duration per segment: ${durationPerSegment}s`);
     
     const segments: RouteSegment[] = [];
     let currentDuration = 0;
@@ -444,61 +448,87 @@ Format your response as a JSON object with an array of suggestions in the follow
       polyline: ''
     });
     
-    // Process each leg to find segment endpoints
-    for (let i = 0; i < route.legs.length; i++) {
-      const leg = route.legs[i];
-      
-      // If adding this leg exceeds the duration per segment,
-      // create an endpoint in the middle of this leg
-      if (currentDuration + leg.duration > (currentSegmentIndex + 1) * durationPerSegment) {
-        // Calculate how far into this leg the segment endpoint should be
-        const remainingDuration = (currentSegmentIndex + 1) * durationPerSegment - currentDuration;
-        const fractionOfLeg = remainingDuration / leg.duration;
-        
-        // Calculate an approximate intermediate location
-        const midpoint: Location = this.interpolateLocation(
-          leg.startLocation,
-          leg.endLocation,
-          fractionOfLeg
-        );
-        
-        // Create a new segment endpoint
-        segments.push({
-          legIndex: i,
-          startLocation: segments[currentSegmentIndex].endLocation,
-          endLocation: midpoint,
-          distance: leg.distance * fractionOfLeg,
-          duration: remainingDuration,
-          polyline: ''
-        });
-        
-        currentSegmentIndex++;
-        currentDuration += remainingDuration;
-        
-        // Process the remainder of this leg
-        const remainingFraction = 1 - fractionOfLeg;
-        
-        if (remainingFraction > 0) {
-          currentDuration += leg.duration * remainingFraction;
-        }
-      } else {
-        // Add the duration of this entire leg
-        currentDuration += leg.duration;
-      }
-    }
+    // We need to create numberOfSegments-1 intermediate points
+    // (start and end points are already accounted for)
+    const intermediatePoints = numberOfSegments - 1;
     
-    // Add end point if needed
-    if (segments.length <= numberOfSegments) {
+    if (intermediatePoints <= 0) {
+      // If no intermediate points needed, just add the end location
       segments.push({
         legIndex: route.legs.length - 1,
-        startLocation: segments[segments.length - 1].endLocation,
+        startLocation: route.waypoints[0],
         endLocation: route.waypoints[route.waypoints.length - 1],
-        distance: 0,
-        duration: 0,
+        distance: route.totalDistance,
+        duration: route.totalDuration,
+        polyline: ''
+      });
+      
+      return segments;
+    }
+    
+    // For each intermediate segment, calculate its endpoint
+    for (let i = 1; i <= intermediatePoints; i++) {
+      const targetDuration = (i * totalDuration) / numberOfSegments;
+      console.log(`Targeting duration for segment ${i}: ${targetDuration}s`);
+      
+      // Find the leg and position within the leg for this segment endpoint
+      let accumulatedDuration = 0;
+      let targetLegIndex = -1;
+      let fractionOfLeg = 0;
+      
+      for (let legIndex = 0; legIndex < route.legs.length; legIndex++) {
+        const leg = route.legs[legIndex];
+        
+        if (accumulatedDuration + leg.duration > targetDuration) {
+          // This leg contains our target point
+          targetLegIndex = legIndex;
+          fractionOfLeg = (targetDuration - accumulatedDuration) / leg.duration;
+          break;
+        }
+        
+        accumulatedDuration += leg.duration;
+      }
+      
+      if (targetLegIndex === -1) {
+        // If we couldn't find the right leg, use the last one
+        targetLegIndex = route.legs.length - 1;
+        fractionOfLeg = 1.0;
+      }
+      
+      // Calculate the endpoint for this segment
+      const leg = route.legs[targetLegIndex];
+      const midpoint = this.interpolateLocation(
+        leg.startLocation,
+        leg.endLocation,
+        fractionOfLeg
+      );
+      
+      console.log(`Created segment endpoint at fraction ${fractionOfLeg} of leg ${targetLegIndex}`);
+      
+      // Add the segment
+      segments.push({
+        legIndex: targetLegIndex,
+        startLocation: segments[segments.length - 1].endLocation,
+        endLocation: midpoint,
+        distance: (route.totalDistance * i) / numberOfSegments,
+        duration: targetDuration - (segments.length > 1 ? segments[segments.length - 1].duration : 0),
         polyline: ''
       });
     }
     
+    // Add end point if needed (if it's not already the last stop)
+    if (segments.length < numberOfSegments + 1) {
+      segments.push({
+        legIndex: route.legs.length - 1,
+        startLocation: segments[segments.length - 1].endLocation,
+        endLocation: route.waypoints[route.waypoints.length - 1],
+        distance: route.totalDistance - (segments.length > 1 ? segments[segments.length - 1].distance : 0),
+        duration: route.totalDuration - (segments.length > 1 ? segments[segments.length - 1].duration : 0),
+        polyline: ''
+      });
+    }
+    
+    console.log(`Created ${segments.length} segments total`);
     return segments;
   }
   
