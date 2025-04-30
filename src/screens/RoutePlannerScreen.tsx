@@ -32,7 +32,7 @@ type RootStackParamList = {
   HomeScreen: undefined;
   RoutePlanner: undefined;
   ItineraryScreen: { tripId: string };
-  ResortDetailsScreen: { tripId: string, stopId: string };
+  ResortDetails: { tripId: string, stopId: string };
   Settings: undefined;
   OfflineTrips: undefined;
 };
@@ -92,6 +92,13 @@ interface LocationResult {
 
 // Define UserPreferences interface
 interface UserPreferences {
+  rvLength?: string;
+  trailerLength?: string;
+  hasPets?: boolean;
+  costPreference?: string;
+  hookupNeeds?: string;
+  prepTime?: number;
+  sceneryPriorities?: string[];
   scenery_preferences?: string[];
   driving_preferences?: {
     max_drive_hours?: number;
@@ -123,10 +130,10 @@ interface RouteCalculationResult {
 
 const RoutePlannerScreen = () => {
   const navigation = useNavigation<RoutePlannerScreenNavigationProp>();
-  const { preferences, isLoading: prefsLoading } = usePreferences<UserPreferences>();
+  const { preferences, isLoading: prefsLoading } = usePreferences();
   const { planRoute, searchLocation, isLoading: mapsLoading } = useMaps();
   const { createTrip, isLoading: tripLoading } = useTrips();
-  const { user, isAuthenticated, isGuest } = useAuth();
+  const { user, isAuthenticated, isGuest, forceRefreshAuth } = useAuth();
 
   // Form state
   const [tripName, setTripName] = useState('');
@@ -153,6 +160,9 @@ const RoutePlannerScreen = () => {
   const isLoadingCombined = prefsLoading || mapsLoading || tripLoading || isLoading;
   const [activeSearchField, setActiveSearchField] = useState<'start' | 'end' | null>(null);
 
+  // Add a state for the created trip ID
+  const [createdTripId, setCreatedTripId] = useState<string | null>(null);
+
   // Generate trip name based on locations and travel days
   const generateTripName = useCallback(() => {
     if (!startLocation || !endLocation) return '';
@@ -177,13 +187,15 @@ const RoutePlannerScreen = () => {
   // Load preferences on mount
   useEffect(() => {
     if (preferences) {
-      // Check if scenery_preferences exists and is an array
-      if (preferences.scenery_preferences && Array.isArray(preferences.scenery_preferences)) {
+      // Check if there are any scenery preferences (either format)
+      if (preferences.sceneryPriorities && Array.isArray(preferences.sceneryPriorities)) {
+        setSelectedScenery(preferences.sceneryPriorities);
+      } else if (preferences.scenery_preferences && Array.isArray(preferences.scenery_preferences)) {
         setSelectedScenery(preferences.scenery_preferences);
       }
-      // Check if driving_preferences exists and has max_drive_hours property
-      if (preferences.driving_preferences && 
-          typeof preferences.driving_preferences.max_drive_hours === 'number') {
+      
+      // Check for driving hours preference (either format)
+      if (preferences.driving_preferences?.max_drive_hours) {
         setMaxDriveHours(preferences.driving_preferences.max_drive_hours);
       }
     }
@@ -194,50 +206,60 @@ const RoutePlannerScreen = () => {
     debounce(async (text: string) => {
       if (text.length > 2) {
         try {
+          console.log(`Debounced search START for: ${text}`);
           const result = await searchLocation(text);
           if (result.success && result.locations) {
-            const formattedResults = result.locations.map((loc: any) => ({
-              description: loc.description,
-              placeId: loc.placeId || '',
-              mainText: loc.mainText || loc.description.split(',')[0],
-              secondaryText: loc.secondaryText || loc.description.split(',').slice(1).join(','),
+            // Correctly map Geocoding results
+            const formattedResults = result.locations.map((loc: Location) => ({
+              description: loc.address, // Use formatted_address
+              placeId: loc.placeId || loc.address, // Use address as fallback ID
+              mainText: loc.address.split(',')[0], // Derive mainText
+              secondaryText: loc.address.split(',').slice(1).join(',').trim(), // Derive secondaryText
             }));
+            console.log(`Setting ${formattedResults.length} start location results`);
             setStartLocationResults(formattedResults);
+          } else {
+            setStartLocationResults([]);
           }
         } catch (err) {
-          console.error('Error searching location:', err);
+          console.error('Error during debounced start location search:', err);
           setStartLocationResults([]);
         }
       } else {
         setStartLocationResults([]);
       }
-    }, 500),
-    []
+    }, 500), // 500ms debounce interval
+    [searchLocation] // Dependency
   );
 
   const debouncedSearchEnd = useCallback(
     debounce(async (text: string) => {
       if (text.length > 2) {
         try {
+          console.log(`Debounced search END for: ${text}`);
           const result = await searchLocation(text);
           if (result.success && result.locations) {
-            const formattedResults = result.locations.map((loc: any) => ({
-              description: loc.description,
-              placeId: loc.placeId || '',
-              mainText: loc.mainText || loc.description.split(',')[0],
-              secondaryText: loc.secondaryText || loc.description.split(',').slice(1).join(','),
+             // Correctly map Geocoding results
+            const formattedResults = result.locations.map((loc: Location) => ({
+              description: loc.address, // Use formatted_address
+              placeId: loc.placeId || loc.address, // Use address as fallback ID
+              mainText: loc.address.split(',')[0], // Derive mainText
+              secondaryText: loc.address.split(',').slice(1).join(',').trim(), // Derive secondaryText
             }));
+            console.log(`Setting ${formattedResults.length} end location results`);
             setEndLocationResults(formattedResults);
+          } else {
+            setEndLocationResults([]);
           }
         } catch (err) {
-          console.error('Error searching location:', err);
+          console.error('Error during debounced end location search:', err);
           setEndLocationResults([]);
         }
       } else {
         setEndLocationResults([]);
       }
-    }, 500),
-    []
+    }, 500), // 500ms debounce interval
+    [searchLocation] // Dependency
   );
 
   // Location handling functions
@@ -245,20 +267,7 @@ const RoutePlannerScreen = () => {
     setStartLocation(text);
     setGeocodedStart(null); // Clear previous selection
     if (text.length > 2) {
-      searchLocation(text)
-        .then(result => {
-          if (result.success && result.locations) {
-            // Convert the location results to the format expected by the component
-            const locationResults = result.locations.map(loc => ({
-              description: loc.address,
-              placeId: loc.placeId || String(Date.now()),
-              mainText: loc.address.split(',')[0],
-              secondaryText: loc.address
-            }));
-            setStartLocationResults(locationResults);
-          }
-        })
-        .catch(err => console.error('Error searching start location:', err));
+      debouncedSearchStart(text); 
     } else {
       setStartLocationResults([]);
     }
@@ -268,20 +277,7 @@ const RoutePlannerScreen = () => {
     setEndLocation(text);
     setGeocodedEnd(null); // Clear previous selection
     if (text.length > 2) {
-      searchLocation(text)
-        .then(result => {
-          if (result.success && result.locations) {
-            // Convert the location results to the format expected by the component
-            const locationResults = result.locations.map(loc => ({
-              description: loc.address,
-              placeId: loc.placeId || String(Date.now()),
-              mainText: loc.address.split(',')[0],
-              secondaryText: loc.address
-            }));
-            setEndLocationResults(locationResults);
-          }
-        })
-        .catch(err => console.error('Error searching end location:', err));
+      debouncedSearchEnd(text);
     } else {
       setEndLocationResults([]);
     }
@@ -310,32 +306,65 @@ const RoutePlannerScreen = () => {
   };
 
   // Navigation between steps
-  const handleNextStep = () => {
+  const handleNextStep = async () => {
     if (currentStep === 1) {
-      // Remove the tripName validation since we auto-generate it
-      if (!startLocation || !endLocation) {
-        setError('Please enter both start and end locations');
-        return;
+      // Geocode locations before moving to step 2
+      try {
+        setIsLoading(true);
+        const startGeo = await searchLocation(startLocation);
+        const endGeo = await searchLocation(endLocation);
+        setIsLoading(false);
+        
+        if (!startGeo.success || !startGeo.locations || startGeo.locations.length === 0 || 
+            !endGeo.success || !endGeo.locations || endGeo.locations.length === 0) {
+          setError('Could not find coordinates for start or end location. Please try a different address.');
+          return;
+        }
+        
+        // Store geocoded results (optional, but good practice)
+        setGeocodedStart(startGeo.locations[0]); 
+        setGeocodedEnd(endGeo.locations[0]);
+        
+        setError(null);
+        setCurrentStep(2);
+      } catch (err) {
+        setIsLoading(false);
+        setError('Failed to verify locations. Please check your connection.');
       }
-      setError(null);
-      setCurrentStep(2);
+      
     } else if (currentStep === 2) {
       if (selectedScenery.length === 0) {
         setError('Please select at least one scenery preference');
         return;
       }
       setError(null);
-      // Calculate route before going to step 3
-      calculateRoute().then((result) => {
-        if (result.success && result.routeResult) {
-          setCurrentStep(3);
-        } else {
-          setError('Failed to calculate route. Please try again.');
+      setIsLoading(true); // Show loading for calculation AND trip creation
+      
+      try {
+        // Calculate route first
+        const routeCalcResult = await calculateRoute();
+        
+        if (!routeCalcResult.success || !routeCalcResult.routeResult) {
+          throw new Error('Failed to calculate route. Please try again.');
         }
-      }).catch(err => {
-        setError('Failed to calculate route. Please try again.');
-        console.error('Route calculation error:', err);
-      });
+        
+        // ---<<< CREATE TRIP HERE >>>---
+        console.log("Route calculated, now creating the trip...");
+        const tripId = await handlePlanRoute(routeCalcResult.routeResult); 
+        
+        if (!tripId) {
+          throw new Error('Failed to create the trip after calculating route.');
+        }
+        // Trip ID is now set in state via handlePlanRoute
+        
+        setIsLoading(false);
+        setCurrentStep(3); // Move to review screen *after* trip is created
+        
+      } catch (err) {
+        setIsLoading(false);
+        setError(err instanceof Error ? err.message : 'An error occurred.');
+        console.error('Error during Step 2 -> Step 3 transition:', err);
+      }
     }
   };
 
@@ -540,210 +569,183 @@ const RoutePlannerScreen = () => {
   };
 
   // Create trip with calculated route
-  const verifyTripExists = async (tripId: string): Promise<boolean> => {
-    console.log('Verifying trip exists:', tripId);
-    try {
-      const result = await SupabaseService.getTripById(tripId);
-      if (result.error) {
-        console.error('Error verifying trip:', result.error);
-        return false;
-      }
-      if (!result.trip) {
-        console.error('Trip not found during verification:', tripId);
-        return false;
-      }
-      console.log('Trip verified successfully:', tripId);
-      return true;
-    } catch (error) {
-      console.error('Exception during trip verification:', error);
-      return false;
+  const handlePlanRoute = async (calculatedRouteResult: RouteResult | null) => {
+    if (!calculatedRouteResult || !calculatedRouteResult.recommendedStops || calculatedRouteResult.recommendedStops.length === 0) {
+      Alert.alert('Error', 'Could not use calculated route data. Please try again.');
+      return null;
     }
-  };
 
-  const handlePlanRoute = async () => {
+    setIsLoading(true);
+    let effectiveUserId: string | null = null;
+    
     try {
-      setIsLoading(true);
-      setError(null);
-
-      if (!routeResult || !routeResult.recommendedStops || routeResult.recommendedStops.length === 0) {
-        throw new Error('No route data available');
+      // ---<<< GET FRESH AUTH STATE >>>---
+      console.log('handlePlanRoute: Re-fetching current user session...');
+      const { user: currentUser, error: authError } = await SupabaseService.getCurrentUser();
+      
+      if (authError || !currentUser) {
+        console.error('handlePlanRoute: Failed to get current user or session invalid:', authError);
+        throw new Error('User not authenticated. Please sign in again.');
+      } else {
+        console.log('handlePlanRoute: Found active session for user:', currentUser.id);
+        effectiveUserId = currentUser.id;
+      }
+      
+      if (!effectiveUserId) {
+         throw new Error('Could not determine a valid user ID.'); 
+      }
+      
+      // ---> Explicitly refresh the session <--- 
+      try {
+        console.log('handlePlanRoute: Attempting explicit session refresh...');
+        const { error: refreshError } = await SupabaseService.getClient().auth.refreshSession();
+        if (refreshError) {
+          console.warn('handlePlanRoute: Session refresh failed:', refreshError.message);
+          // Don't necessarily block, but log the warning
+        } else {
+          console.log('handlePlanRoute: Session refresh successful.');
+        }
+      } catch (refreshException) {
+        console.error('handlePlanRoute: Exception during session refresh:', refreshException);
       }
 
-      // Create trip data
+      // Generate trip name if it's not set
+      let currentTripName = tripName;
+      if (!currentTripName) {
+        const generatedName = generateTripName();
+        setTripName(generatedName);
+        currentTripName = generatedName;
+      }
+      
+      console.log('Using effective user ID for trip creation:', effectiveUserId);
+      
+      // Create trip data USING THE PASSED-IN ARGUMENT
       const tripData = {
-        user_id: '00000000-0000-4000-8000-000000000000', // Mock user ID for testing
-        name: tripName,
+        name: currentTripName,
+        user_id: effectiveUserId,
         start_location: {
-          latitude: routeResult.startCoords.latitude,
-          longitude: routeResult.startCoords.longitude,
-          address: routeResult.recommendedStops[0].location.address
+          address: calculatedRouteResult.recommendedStops[0].location.address,
+          latitude: calculatedRouteResult.recommendedStops[0].location.latitude,
+          longitude: calculatedRouteResult.recommendedStops[0].location.longitude,
         },
         end_location: {
-          latitude: routeResult.endCoords.latitude,
-          longitude: routeResult.endCoords.longitude,
-          address: routeResult.recommendedStops[routeResult.recommendedStops.length - 1].location.address
+          address: calculatedRouteResult.recommendedStops[calculatedRouteResult.recommendedStops.length - 1].location.address,
+          latitude: calculatedRouteResult.recommendedStops[calculatedRouteResult.recommendedStops.length - 1].location.latitude,
+          longitude: calculatedRouteResult.recommendedStops[calculatedRouteResult.recommendedStops.length - 1].location.longitude,
         },
-        status: 'planned' as const
+        status: 'planned' as const,
       };
-
-      console.log('Creating trip with data:', tripData);
-      const tripResponse = await createTrip(tripData);
-
-      if (tripResponse.error || !tripResponse.trip) {
-        throw new Error(tripResponse.error?.message || 'Failed to create trip');
-      }
-
-      const tripId = tripResponse.trip.id;
-      console.log(`Trip created with ID: ${tripId}`);
-
-      // Wait for database consistency
-      console.log('Waiting for database consistency before adding stops...');
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      // Verify trip exists
-      const tripExists = await verifyTripExists(tripId);
-      if (!tripExists) {
-        throw new Error('Could not verify trip exists in database');
-      }
       
-      // Map the recommended stops to the format needed for trip creation
-      const tripStops = routeResult.recommendedStops.map((stop, index) => {
-        // Use the date from the stop object which was calculated based on tripStartDate
+      console.log('Attempting to create trip with this data:', JSON.stringify(tripData, null, 2));
+
+      // Direct call to createTrip
+      const result = await createTrip(tripData);
+
+      if (result.error || !result.trip) {
+        console.error(`Trip creation failed:`, result.error);
+        throw new Error(`Failed to create trip: ${result.error?.message || 'Unknown error'}`);
+      }
+
+      const trip = result.trip;
+      const tripId = trip.id;
+      console.log('Trip created successfully, ID:', tripId);
+      
+      // Add stops using the PASSED-IN ARGUMENT
+      const tripStops: TripStop[] = [];
+      const maxStopRetries = 2;
+
+      for (let i = 0; i < calculatedRouteResult.recommendedStops.length; i++) {
+        const stop = calculatedRouteResult.recommendedStops[i];
+        const locationNote = `Location: ${stop.location.address} (${stop.location.latitude}, ${stop.location.longitude})`;
         const checkInDate = new Date(stop.date);
-        
-        // Calculate checkout based on the number of nights for this stop
+        const nightsAtStop = nightsPerStop[i] || 1;
         const checkOutDate = new Date(checkInDate);
-        checkOutDate.setDate(checkOutDate.getDate() + (nightsPerStop[index] || 1));
+        checkOutDate.setDate(checkOutDate.getDate() + nightsAtStop);
         
-        // Create a rich notes field with location information for extraction later
-        const locationNote = stop.location 
-          ? `Location: ${stop.location.address} (${stop.location.latitude}, ${stop.location.longitude})`
-          : '';
-        
-        return {
-          resort_id: '00000000-0000-4000-8000-000000000000', // Default placeholder
-          stop_order: index,
+        const stopData = {
+          resort_id: null, 
+          stop_order: i,
           check_in: checkInDate.toISOString().split('T')[0],
           check_out: checkOutDate.toISOString().split('T')[0],
-          notes: locationNote
-        };
-      });
-
-      // Add stops with proper error handling and retries
-      console.log(`Starting to add ${tripStops.length} stops to trip ${tripId}`);
-      const addedStops = [];
-      const failedStops = [];
-      
-      for (let index = 0; index < tripStops.length; index++) {
-        const stop = tripStops[index];
-        let attempts = 0;
-        let success = false;
-        const maxAttempts = 5;
-        
-        // Make sure stop has all required fields for the database
-        const stopData = {
-          resort_id: stop.resort_id,
-          stop_order: stop.stop_order,
-          check_in: stop.check_in,
-          check_out: stop.check_out,
-          notes: stop.notes || `Location for stop ${index + 1}`
+          notes: locationNote,
         };
         
-        console.log(`Adding stop ${index + 1}/${tripStops.length}...`, stopData);
-        
-        while (!success && attempts < maxAttempts) {
-          attempts++;
-          try {
-            const result = await SupabaseService.addTripStop(tripId, stopData);
-            if (result.error) {
-              console.error(`Error adding stop ${index} (attempt ${attempts}):`, result.error);
-              // Wait with exponential backoff
-              const backoffTime = Math.pow(2, attempts) * 1000;
-              console.log(`Retrying in ${backoffTime / 1000} seconds...`);
-              await new Promise(resolve => setTimeout(resolve, backoffTime));
+        let stopResult: TripStop | null = null;
+        let stopRetryCount = 0;
+        while (!stopResult && stopRetryCount < maxStopRetries) {
+          console.log(`Adding stop ${i} (order ${stopData.stop_order}) attempt ${stopRetryCount + 1}:`, stopData);
+          const addResult = await SupabaseService.addTripStop(tripId, stopData);
+          
+          if (addResult.error) {
+            console.error(`Failed to add stop ${i} (attempt ${stopRetryCount + 1}):`, addResult.error);
+            if (addResult.error.message?.includes('authent')) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+              stopRetryCount++;
             } else {
-              console.log(`Successfully added stop ${index} to trip:`, result.stop?.id);
-              addedStops.push(result.stop);
-              success = true;
+              break; 
             }
-          } catch (error) {
-            console.error(`Exception adding stop ${index} (attempt ${attempts}):`, error);
-            if (attempts >= maxAttempts) {
-              failedStops.push({index, error});
-            }
-            // Wait with exponential backoff
-            const backoffTime = Math.pow(2, attempts) * 1000;
-            await new Promise(resolve => setTimeout(resolve, backoffTime));
+          } else {
+            stopResult = addResult.stop;
+            break;
           }
         }
         
-        if (!success) {
-          console.error(`Failed to add stop ${index} after ${maxAttempts} attempts`);
+        if (stopResult) {
+          tripStops.push(stopResult);
+        } else {
+          console.warn(`Could not add stop ${i} after ${maxStopRetries} attempts`);
         }
       }
       
-      // Get the final trip with all stops
-      const finalTrip = await SupabaseService.getTripById(tripId);
+      console.log(`Added ${tripStops.length} / ${calculatedRouteResult.recommendedStops.length} stops to trip ${tripId}`);
+      
+      setCreatedTripId(tripId); 
       
       setIsLoading(false);
+      return tripId;
       
-      if (failedStops.length > 0) {
-        console.warn(`Some stops (${failedStops.length}) failed to add`);
-        Alert.alert(
-          'Some Stops Not Added', 
-          `Created trip with ${addedStops.length} out of ${tripStops.length} stops.`
-        );
-      }
-      
-      if (!finalTrip.error && finalTrip.trip) {
-        navigation.navigate('ItineraryScreen', { tripId });
-        return { tripId };
-      } else {
-        // Navigate anyway, as we at least have the trip created
-        console.warn('Could not fetch final trip, but continuing with navigation');
-        navigation.navigate('ItineraryScreen', { tripId });
-        return { tripId };
-      }
-    } catch (err) {
+    } catch (error) {
+      console.error('Error in handlePlanRoute:', error);
       setIsLoading(false);
-      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
-      console.error('Error in handlePlanRoute:', errorMessage);
-      Alert.alert('Error', `Failed to create trip: ${errorMessage}`);
+      Alert.alert('Error', `Failed to create trip: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return null;
     }
   };
 
   // Add a new function to handle viewing resort options
   const handleViewResortOptions = async (stopIndex: number) => {
+    console.log('View resort options for stop:', stopIndex);
+    
+    // Trip ID should exist by the time this screen is visible
+    if (!createdTripId) {
+      console.error('Error: createdTripId is missing when trying to view resort options.');
+      Alert.alert('Error', 'Cannot view resort options because the trip ID is missing. Please go back and try again.');
+      return;
+    }
+
     try {
-      // First check if we already have a tripId from a previous creation
-      if (!routeResult || !routeResult.recommendedStops) {
-        Alert.alert('Error', 'No route data available');
-        return;
-      }
-
-      setIsLoading(true);
-
-      // Create the trip only if it hasn't been created yet
-      let tripResult = await handlePlanRoute();
+      // Now we have a tripId, proceed with navigation
+      console.log(`Navigating to resort details with tripId: ${createdTripId}, stopId: ${stopIndex}`);
       
-      if (!tripResult || !tripResult.tripId) {
-        setIsLoading(false);
-        Alert.alert('Error', 'Failed to create trip. Please try again.');
-        return;
+      // Store navigation data just in case
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        await AsyncStorage.setItem('lastTripId', createdTripId);
+        await AsyncStorage.setItem('lastStopIndex', stopIndex.toString());
+        console.log('Stored navigation data in AsyncStorage for recovery');
+      } catch (error) {
+        console.error('Failed to store navigation data:', error);
       }
-
-      setIsLoading(false);
       
-      // Navigate to the resort details screen with the tripId and stopId
-      navigation.navigate('ResortDetailsScreen', { 
-        tripId: tripResult.tripId, 
-        stopId: stopIndex.toString() 
+      // Navigate to the ResortDetails screen
+      navigation.navigate('ResortDetails', {
+        tripId: createdTripId,
+        stopId: stopIndex.toString()
       });
+
     } catch (error) {
-      setIsLoading(false);
-      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      Alert.alert('Error', `Failed to view resort options: ${errorMessage}`);
+      console.error('Error navigating to resort details:', error);
+      Alert.alert('Error', 'Could not navigate to resort options. Please try again.');
     }
   };
 
@@ -982,7 +984,7 @@ const RoutePlannerScreen = () => {
           
           <TouchableOpacity 
             style={styles.planButton} 
-            onPress={handlePlanRoute}
+            onPress={() => handlePlanRoute(routeResult)}
             disabled={isLoading}
           >
             {isLoading ? (

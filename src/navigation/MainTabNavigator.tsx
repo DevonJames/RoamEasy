@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { ParamListBase, RouteProp } from '@react-navigation/native';
+import { Alert } from 'react-native';
 
 // Import screens
 import HomeScreen from '../screens/HomeScreen';
@@ -13,6 +14,22 @@ import SettingsScreen from '../screens/SettingsScreen';
 const Tab = createBottomTabNavigator();
 
 const MainTabNavigator = () => {
+  console.log('Rendering MainTabNavigator - Should show Home, Plan, Offline, Settings tabs');
+  
+  // Add effect to alert when component mounts
+  useEffect(() => {
+    console.log('🌴 MainTabNavigator MOUNTED - User should see tabs now');
+    
+    // Optional: Show alert to confirm component mounting
+    setTimeout(() => {
+      Alert.alert('Welcome to RoamEasy', 'You are now signed in and can start planning your trips!');
+    }, 500);
+    
+    return () => {
+      console.log('MainTabNavigator UNMOUNTED');
+    };
+  }, []);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }: { route: RouteProp<ParamListBase, string> }) => ({

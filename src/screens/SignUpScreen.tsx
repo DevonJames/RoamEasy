@@ -148,6 +148,10 @@ const SignUpScreen = React.memo(() => {
           'Your account has been created successfully. You will now be redirected to the home screen.',
           [{ text: 'OK' }]
         );
+
+        // Navigate to Sign In screen
+        console.log('Navigate to Sign In');
+        navigation.navigate('SignIn');
       }
     } catch (err) {
       console.error('Sign up error:', err);

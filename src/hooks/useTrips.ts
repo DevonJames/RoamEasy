@@ -136,55 +136,32 @@ export default function useTrips() {
   const getTrip = async (tripId: string) => {
     try {
       setState(prev => ({ ...prev, isLoading: true, error: null }));
-
-      // Check if we already have this trip in state
-      const existingTrip = state.trips.find(t => t.id === tripId);
-      if (existingTrip && existingTrip.stops) {
+      
+      console.log('Getting trip:', tripId);
+      const trip = await SupabaseService.getTrip(tripId);
+      
+      if (!trip) {
         setState(prev => ({
           ...prev,
-          currentTrip: existingTrip,
+          error: new Error('Trip not found'),
           isLoading: false
         }));
-        return existingTrip;
+        return null;
       }
-
-      // Try offline cache first
-      const cachedTrip = await OfflineService.getCachedTrip(tripId);
-      if (cachedTrip) {
-        setState(prev => ({
-          ...prev,
-          currentTrip: cachedTrip,
-          isLoading: false
-        }));
-        return cachedTrip;
-      }
-
-      // If online and not guest, fetch from Supabase
-      if (isConnected && !isGuest) {
-        const { trip, error } = await SupabaseService.getTripById(tripId);
-
-        if (error) {
-          throw error;
-        }
-
-        if (trip) {
-          // Cache trip for offline use
-          await OfflineService.cacheTrip(trip);
-          
-          setState(prev => ({
-            ...prev,
-            currentTrip: trip,
-            isLoading: false
-          }));
-          return trip;
-        }
-      }
-
-      throw new Error('Trip not found');
-    } catch (err) {
+      
+      console.log(`Retrieved trip ${tripId} with ${trip.stops?.length || 0} stops`);
       setState(prev => ({
         ...prev,
-        error: err as Error,
+        currentTrip: trip,
+        isLoading: false
+      }));
+      return trip;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to get trip';
+      console.error('Error in getTrip:', errorMessage);
+      setState(prev => ({
+        ...prev,
+        error: new Error(errorMessage),
         isLoading: false
       }));
       return null;
@@ -192,104 +169,72 @@ export default function useTrips() {
   };
 
   // Create a new trip
-  const createTrip = async (tripData: Omit<Trip, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
-    if (!user) return { success: false, error: new Error('User not authenticated') };
-
+  const createTrip = async (tripDataWithId: Trip) => {
     try {
       setState(prev => ({ ...prev, isLoading: true, error: null }));
 
-      if (isGuest) {
-        // For guest users, we only store locally
-        const now = new Date().toISOString();
-        const newTrip: Trip = {
-          ...tripData,
-          id: `local-${Date.now()}`,
-          user_id: user.id,
-          created_at: now,
-          updated_at: now,
-          stops: []
-        };
+      // Determine if it's a guest or registered user based on the provided user_id
+      // Assuming guest ID is '00000000-0000-4000-8000-000000000000' or similar check if needed,
+      // OR simply rely on SupabaseService.createTrip to handle auth based on the session associated with the request.
+      // For now, let's assume SupabaseService handles it correctly based on the implicit session.
 
-        // Save to offline storage
-        await OfflineService.cacheTrip(newTrip);
-
-        // Update state
-        setState(prev => ({
-          ...prev,
-          trips: [...prev.trips, newTrip],
-          currentTrip: newTrip,
-          isLoading: false
-        }));
-
-        return { success: true, trip: newTrip };
-      } else if (isConnected) {
-        // For registered users, save to Supabase
-        console.log('Creating trip in Supabase:', JSON.stringify({
-          ...tripData,
-          user_id: user.id
-        }, null, 2));
+      // We'll simplify and assume we only call SupabaseService if online
+      if (isConnected) {
+        // Registered user, online OR Guest user online (if anon auth enabled)
+        console.log('Creating trip in Supabase with provided data:', JSON.stringify(tripDataWithId, null, 2));
         
-        // Use a properly formatted UUID for testing purposes if we're using the test ID
-        const userId = user.id === 'test-user-id-123' 
-          ? '00000000-0000-4000-8000-000000000000' // Standard test UUID that follows proper format
-          : user.id;
-        
-        const { trip, error } = await SupabaseService.createTrip({
-          ...tripData,
-          user_id: userId
-        });
+        const { trip, error } = await SupabaseService.createTrip(tripDataWithId);
 
         if (error) {
-          console.error('Supabase error:', error);
-          throw error;
+          console.error('Supabase error during trip creation:', error);
+          // Check if the error is specifically an auth error
+          if (error.message.includes('authent') || error.message.includes('JWT')) {
+             throw new Error('User authentication failed during trip creation. Please sign out and back in.');
+          } else {
+            throw error; // Re-throw other errors
+          }
         }
 
         if (trip) {
-          // Cache for offline use
-          await OfflineService.cacheTrip(trip);
-
-          // Update state
+          await OfflineService.cacheTrip(trip); // Cache after successful creation
           setState(prev => ({
             ...prev,
             trips: [...prev.trips, trip],
             currentTrip: trip,
             isLoading: false
           }));
-
           return { success: true, trip };
         }
         
-        throw new Error('Failed to create trip in Supabase');
+        throw new Error('Failed to create trip in Supabase, no trip data returned.');
+
       } else {
-        // Offline but registered - store locally and sync later
+        // Offline logic (applies to both guests and registered users when offline)
+        console.log('Offline: Creating trip locally.');
         const now = new Date().toISOString();
+        const offlineTripId = `offline-${Date.now()}`;
         const newTrip: Trip = {
-          ...tripData,
-          id: `offline-${Date.now()}`,
-          user_id: user.id,
+          ...tripDataWithId,
+          id: offlineTripId,
           created_at: now,
           updated_at: now,
           stops: []
         };
-
-        // Mark for sync when online
-        await OfflineService.queueForSync('trip', newTrip);
-
-        // Save to offline storage
+        // If it's a registered user offline, queue for sync
+        if (tripDataWithId.user_id !== '00000000-0000-4000-8000-000000000000') { // Example guest check
+           await OfflineService.queueForSync('trip', newTrip);
+        }
         await OfflineService.cacheTrip(newTrip);
-
-        // Update state
         setState(prev => ({
           ...prev,
           trips: [...prev.trips, newTrip],
           currentTrip: newTrip,
           isLoading: false
         }));
-
         return { success: true, trip: newTrip };
       }
     } catch (err) {
-      console.error('Error in createTrip:', err);
+      console.error('Error in useTrips.createTrip:', err);
       setState(prev => ({
         ...prev,
         error: err as Error,

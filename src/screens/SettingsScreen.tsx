@@ -10,16 +10,24 @@ import {
   SafeAreaView,
   Alert
 } from 'react-native';
-import { useNavigation, CommonActions } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import useAuth from '../hooks/useAuth';
+import useAppNavigation from '../hooks/useAppNavigation';
+import { resetToAuth } from '../navigation/navigationHelper';
 
 // Define navigation types to match AppNavigator
 type MainStackParamList = {
   Main: undefined;
   Itinerary: { tripId: string };
   ResortDetails: { tripId: string, stopId: string };
+};
+
+// For accessing the root navigation
+type RootNavigatorParamList = {
+  Main: undefined;
   AuthStack: undefined;
+  SignIn: undefined;
 };
 
 type SettingsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -53,6 +61,7 @@ const MOCK_USER = {
 const SettingsScreen = () => {
   const navigation = useNavigation<SettingsScreenNavigationProp>();
   const { signOut } = useAuth();
+  const appNavigation = useAppNavigation();
   
   // State for user settings
   const [user, setUser] = useState(MOCK_USER);
@@ -87,23 +96,51 @@ const SettingsScreen = () => {
   const handleSignOut = async () => {
     try {
       console.log('Signing out user...');
+      
+      // Force clear AsyncStorage for guest mode and auth FIRST
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        await AsyncStorage.removeItem('guest_mode');
+        await AsyncStorage.removeItem('user_authenticated');
+        await AsyncStorage.removeItem('force_auth_state');
+        console.log('All auth storage cleared');
+      } catch (error) {
+        console.error('Error clearing auth storage:', error);
+      }
+      
+      // Then call the auth service
       const result = await signOut();
       
       if (result.success) {
         console.log('User successfully signed out');
         
-        // Force navigation to the Auth stack
-        navigation.dispatch(
-          CommonActions.reset({
-            index: 0,
-            routes: [
-              { name: 'AuthStack' },
-            ],
-          })
-        );
-        
-        // Show confirmation to the user
-        Alert.alert('Signed Out', 'You have been successfully signed out');
+        // Use the navigation helper instead of direct navigation
+        try {
+          console.log('Using resetToAuth helper function');
+          resetToAuth();
+        } catch (navError) {
+          console.error('Error with resetToAuth:', navError);
+          
+          // Last resort for extreme cases - full app restart
+          Alert.alert(
+            'Signed Out',
+            'You have been signed out. Please restart the app.',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  // In development, you can reload the app
+                  if (__DEV__) {
+                    const { DevSettings } = require('react-native');
+                    if (DevSettings && DevSettings.reload) {
+                      DevSettings.reload();
+                    }
+                  }
+                }
+              }
+            ]
+          );
+        }
       } else {
         console.error('Sign out failed:', result.error);
         Alert.alert('Error', 'Failed to sign out. Please try again.');

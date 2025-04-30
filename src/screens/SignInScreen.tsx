@@ -12,11 +12,12 @@ import {
   SafeAreaView,
   ActivityIndicator
 } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, CommonActions } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import useAuth from '../hooks/useAuth';
 import Logo from '../assets/logo';
+import { resetToMain } from '../navigation/navigationHelper';
 
 // Define theme colors
 const COLORS = {
@@ -33,354 +34,458 @@ const COLORS = {
 
 // Define navigation types
 type AuthStackParamList = {
+  Splash: undefined;
   SignIn: undefined;
   SignUp: undefined;
   GuestMode: undefined;
-  Main: undefined;
   ForgotPassword: undefined;
 };
 
+// Define a type for our root navigation
+type RootStackParamList = {
+  AuthStack: undefined; 
+  Main: undefined;
+};
+
 type SignInScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList>;
+type RootNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const SignInScreen = React.memo(() => {
-  // Use ref to track if component is mounted
-  const isMounted = useRef(true);
-  const passwordBuffer = useRef('');
-  const navigation = useNavigation<SignInScreenNavigationProp>();
+  console.log('Rendering SignInScreen');
   
-  // Get auth functions but NOT state to prevent unnecessary re-renders
-  const { signIn, signInWithGoogle, signInWithApple, signInWithFacebook, continueAsGuest } = useAuth();
+  try {
+    // Use ref to track if component is mounted
+    const isMounted = useRef(true);
+    const passwordBuffer = useRef('');
+    const navigation = useNavigation<SignInScreenNavigationProp>();
+    
+    // Get auth functions but NOT state to prevent unnecessary re-renders
+    const { signIn, signInWithGoogle, signInWithApple, signInWithFacebook, continueAsGuest, isAuthenticated, isGuest } = useAuth();
 
-  // Form state - keep local to prevent global state changes
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [displayPassword, setDisplayPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  // Debug logging
-  useEffect(() => {
-    console.log('SignInScreen mounted, setting up');
+    // Form state - keep local to prevent global state changes
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [displayPassword, setDisplayPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    
+    // Debug logging
+    useEffect(() => {
+      console.log('SignInScreen mounted, setting up');
 
-    return () => {
-      console.log('SignInScreen unmounted, cleaning up');
-      isMounted.current = false;
+      return () => {
+        console.log('SignInScreen unmounted, cleaning up');
+        isMounted.current = false;
+      };
+    }, []);
+    
+    // Track password changes in a buffer first to prevent frequent state updates
+    const handlePasswordChange = (text: string) => {
+      if (!isMounted.current) return;
+      
+      // Update display value immediately for responsive UI
+      setDisplayPassword(text);
+      
+      // Use the buffer to avoid state updates
+      passwordBuffer.current = text;
+      
+      // Only update state after typing stops for better performance
+      setTimeout(() => {
+        if (isMounted.current && passwordBuffer.current === text) {
+          setPassword(text);
+        }
+      }, 300);
     };
-  }, []);
-  
-  // Track password changes in a buffer first to prevent frequent state updates
-  const handlePasswordChange = (text: string) => {
-    if (!isMounted.current) return;
-    
-    // Update display value immediately for responsive UI
-    setDisplayPassword(text);
-    
-    // Use the buffer to avoid state updates
-    passwordBuffer.current = text;
-    
-    // Only update state after typing stops for better performance
-    setTimeout(() => {
-      if (isMounted.current && passwordBuffer.current === text) {
-        setPassword(text);
+
+    // Add effect to navigate when auth state changes
+    useEffect(() => {
+      console.log('Auth state in SignInScreen:', { isAuthenticated, isGuest });
+      if (isAuthenticated || isGuest) {
+        console.log('User is authenticated, navigating to Main');
+        
+        // Force navigation using a direct approach
+        try {
+          // First try the exported navigation utility
+          resetToMain();
+          console.log('Used exported navigation reset function');
+        } catch (error) {
+          console.error('Error with exported navigation:', error);
+          
+          try {
+            const rootNavigation = navigation.getParent() as RootNavigationProp;
+            if (rootNavigation) {
+              console.log('Found root navigation, resetting to Main');
+              rootNavigation.reset({
+                index: 0,
+                routes: [{ name: 'Main' }],
+              });
+            } else {
+              console.log('Root navigation not available, using resetRoot approach');
+              // Alternative approach using the absolute root navigator
+              const { CommonActions } = require('@react-navigation/native');
+              const rootNavigator = navigation.getParent() || navigation;
+              rootNavigator.dispatch(
+                CommonActions.reset({
+                  index: 0,
+                  routes: [{ name: 'Main' }],
+                })
+              );
+            }
+          } catch (navError) {
+            console.error('Navigation error:', navError);
+            Alert.alert('Authentication successful', 'Please restart the app if you are not redirected.');
+          }
+        }
       }
-    }, 300);
-  };
+    }, [isAuthenticated, isGuest, navigation]);
 
-  const handleSignIn = async () => {
-    console.log('Sign in button pressed');
-    setError(null);
-    setIsLoading(true);
+    const handleSignIn = async () => {
+      console.log('Sign in button pressed');
+      setError(null);
+      setIsLoading(true);
 
-    // Get latest value from buffer
-    const currentPassword = passwordBuffer.current || password;
+      // Get latest value from buffer
+      const currentPassword = passwordBuffer.current || password;
 
-    // Basic validation
-    if (!email || !currentPassword) {
-      setError('Please enter both email and password');
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      console.log('Calling signIn function with:', { email, passwordLength: currentPassword.length });
-      const result = await signIn(email, currentPassword);
-      console.log('Sign in result:', result);
-      
-      if (!result.success && result.error) {
-        setError(result.error.message);
-      } else {
-        // Success! Navigation will be handled by AppNavigator
-        console.log('Sign in successful!');
-      }
-    } catch (err) {
-      console.error('Sign in error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to sign in. Please try again.');
-    } finally {
-      if (isMounted.current) {
+      // Basic validation
+      if (!email || !currentPassword) {
+        setError('Please enter both email and password');
         setIsLoading(false);
+        return;
       }
-    }
-  };
 
-  const handleForgotPassword = () => {
-    console.log('Forgot password pressed');
-    // TODO: Implement forgot password functionality
-    Alert.alert(
-      'Reset Password',
-      'Please enter your email address to receive a password reset link.',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Send Link',
-          onPress: () => {
-            // TODO: Call the reset password API
-            Alert.alert('Password Reset Link Sent', 'Please check your email for instructions to reset your password.');
+      try {
+        console.log('Calling signIn function with:', { email, passwordLength: currentPassword.length });
+        const result = await signIn(email, currentPassword);
+        console.log('Sign in result:', result);
+        
+        if (!result.success && result.error) {
+          setError(result.error.message);
+        } else if (result.success) {
+          // Also directly set AsyncStorage flag for AppNavigator to check on next render
+          try {
+            // Direct AsyncStorage approach - set flag that can trigger auth changes
+            const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+            await AsyncStorage.setItem('force_auth_state', 'authenticated');
+            await AsyncStorage.setItem('auth_timestamp', Date.now().toString());
+            console.log('Set direct AsyncStorage flags to force auth state update');
+          } catch (storageError) {
+            console.error('Failed to set direct storage flags:', storageError);
+          }
+        }
+      } catch (err) {
+        console.error('Sign in error:', err);
+        setError(err instanceof Error ? err.message : 'Failed to sign in. Please try again.');
+      } finally {
+        if (isMounted.current) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    const handleForgotPassword = () => {
+      console.log('Forgot password pressed');
+      // TODO: Implement forgot password functionality
+      Alert.alert(
+        'Reset Password',
+        'Please enter your email address to receive a password reset link.',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
           },
-        },
-      ]
-    );
-  };
+          {
+            text: 'Send Link',
+            onPress: () => {
+              // TODO: Call the reset password API
+              Alert.alert('Password Reset Link Sent', 'Please check your email for instructions to reset your password.');
+            },
+          },
+        ]
+      );
+    };
 
-  const handleGoogleSignIn = async () => {
-    console.log('Google sign in pressed');
-    setError(null);
-    setIsLoading(true);
-    try {
-      const result = await signInWithGoogle();
-      console.log('Google sign in result:', result);
-      
-      if (!result.success && result.error) {
-        setError(result.error.message);
+    const handleGoogleSignIn = async () => {
+      console.log('Google sign in pressed');
+      setError(null);
+      setIsLoading(true);
+      try {
+        const result = await signInWithGoogle();
+        console.log('Google sign in result:', result);
+        
+        if (!result.success && result.error) {
+          setError(result.error.message);
+        }
+      } catch (err) {
+        console.error('Google sign in error:', err);
+        setError(err instanceof Error ? err.message : 'Failed to sign in with Google. Please try again.');
+      } finally {
+        if (isMounted.current) {
+          setIsLoading(false);
+        }
       }
-    } catch (err) {
-      console.error('Google sign in error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to sign in with Google. Please try again.');
-    } finally {
-      if (isMounted.current) {
-        setIsLoading(false);
-      }
-    }
-  };
+    };
 
-  const handleAppleSignIn = async () => {
-    console.log('Apple sign in pressed');
-    setError(null);
-    setIsLoading(true);
-    try {
-      const result = await signInWithApple();
-      console.log('Apple sign in result:', result);
-      
-      if (!result.success && result.error) {
-        setError(result.error.message);
+    const handleAppleSignIn = async () => {
+      console.log('Apple sign in pressed');
+      setError(null);
+      setIsLoading(true);
+      try {
+        const result = await signInWithApple();
+        console.log('Apple sign in result:', result);
+        
+        if (!result.success && result.error) {
+          setError(result.error.message);
+        }
+      } catch (err) {
+        console.error('Apple sign in error:', err);
+        setError(err instanceof Error ? err.message : 'Failed to sign in with Apple. Please try again.');
+      } finally {
+        if (isMounted.current) {
+          setIsLoading(false);
+        }
       }
-    } catch (err) {
-      console.error('Apple sign in error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to sign in with Apple. Please try again.');
-    } finally {
-      if (isMounted.current) {
-        setIsLoading(false);
-      }
-    }
-  };
+    };
 
-  const handleFacebookSignIn = async () => {
-    console.log('Facebook sign in pressed');
-    setError(null);
-    setIsLoading(true);
-    try {
-      const result = await signInWithFacebook();
-      console.log('Facebook sign in result:', result);
-      
-      if (!result.success && result.error) {
-        setError(result.error.message);
+    const handleFacebookSignIn = async () => {
+      console.log('Facebook sign in pressed');
+      setError(null);
+      setIsLoading(true);
+      try {
+        const result = await signInWithFacebook();
+        console.log('Facebook sign in result:', result);
+        
+        if (!result.success && result.error) {
+          setError(result.error.message);
+        }
+      } catch (err) {
+        console.error('Facebook sign in error:', err);
+        setError(err instanceof Error ? err.message : 'Failed to sign in with Facebook. Please try again.');
+      } finally {
+        if (isMounted.current) {
+          setIsLoading(false);
+        }
       }
-    } catch (err) {
-      console.error('Facebook sign in error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to sign in with Facebook. Please try again.');
-    } finally {
-      if (isMounted.current) {
-        setIsLoading(false);
+    };
+
+    const handleGuestMode = async () => {
+      console.log('Guest mode pressed');
+      setError(null);
+      setIsLoading(true);
+      try {
+        // First attempt to be extra sure local storage is updated
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        await AsyncStorage.setItem('guest_mode', 'true');
+        
+        // Then call the continueAsGuest method
+        const result = await continueAsGuest();
+        console.log('Guest mode result:', result);
+        
+        if (!result.success && result.error) {
+          setError(result.error.message);
+          Alert.alert('Error', 'Could not access as guest. Please try again.');
+        }
+        // Success is handled by the useEffect that watches isGuest
+      } catch (err) {
+        console.error('Guest mode error:', err);
+        setError(err instanceof Error ? err.message : 'Failed to continue as guest. Please try again.');
+      } finally {
+        if (isMounted.current) {
+          setIsLoading(false);
+        }
       }
-    }
-  };
+    };
 
-  const handleGuestMode = async () => {
-    console.log('Guest mode pressed');
-    setError(null);
-    setIsLoading(true);
-    try {
-      const result = await continueAsGuest();
-      console.log('Guest mode result:', result);
-      
-      if (!result.success && result.error) {
-        setError(result.error.message);
-      }
-    } catch (err) {
-      console.error('Guest mode error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to continue as guest. Please try again.');
-    } finally {
-      if (isMounted.current) {
-        setIsLoading(false);
-      }
-    }
-  };
-
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Logo and Header */}
-        <View style={styles.header}>
-          <Logo size={60} color={COLORS.primary} />
-          <Text style={styles.appName}>RoamEasy</Text>
-          <Text style={styles.tagline}>Sign in to your account</Text>
-        </View>
-
-        {/* Error Display */}
-        {error && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
-
-        {/* Simple Form */}
-        <View style={styles.formContainer}>
-          {/* Email */}
-          <Text style={styles.label}>Email</Text>
-          <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={24} color={COLORS.primary} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="e.g., john@example.com"
-              value={email}
-              onChangeText={text => isMounted.current && setEmail(text)}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              testID="emailInput"
-              returnKeyType="next"
-            />
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Logo and Header */}
+          <View style={styles.header}>
+            <Logo size={60} color={COLORS.primary} />
+            <Text style={styles.appName}>RoamEasy</Text>
+            <Text style={styles.tagline}>Sign in to your account</Text>
           </View>
 
-          {/* Password */}
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={24} color={COLORS.primary} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your password"
-              value={displayPassword}
-              onChangeText={handlePasswordChange}
-              secureTextEntry={!showPassword}
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-              autoComplete="off"
-              textContentType="oneTimeCode"
-              keyboardType={showPassword ? "visible-password" : "default"}
-              testID="passwordInput"
-              returnKeyType="done"
-              onSubmitEditing={handleSignIn}
-            />
-            <TouchableOpacity 
-              onPress={() => setShowPassword(!showPassword)}
-              style={styles.passwordToggle}
-            >
-              <Ionicons 
-                name={showPassword ? "eye-off-outline" : "eye-outline"} 
-                size={24} 
-                color={COLORS.gray} 
+          {/* Error Display */}
+          {error && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
+          {/* Simple Form */}
+          <View style={styles.formContainer}>
+            {/* Email */}
+            <Text style={styles.label}>Email</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="mail-outline" size={24} color={COLORS.primary} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., john@example.com"
+                value={email}
+                onChangeText={text => isMounted.current && setEmail(text)}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                testID="emailInput"
+                returnKeyType="next"
               />
-            </TouchableOpacity>
-          </View>
+            </View>
 
-          {/* Forgot Password */}
-          <TouchableOpacity 
-            style={styles.forgotPasswordContainer} 
-            onPress={handleForgotPassword}
-            testID="forgotPasswordButton"
-          >
-            <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-          </TouchableOpacity>
+            {/* Password */}
+            <Text style={styles.label}>Password</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="lock-closed-outline" size={24} color={COLORS.primary} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your password"
+                value={displayPassword}
+                onChangeText={handlePasswordChange}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                spellCheck={false}
+                autoComplete="off"
+                textContentType="oneTimeCode"
+                keyboardType={showPassword ? "visible-password" : "default"}
+                testID="passwordInput"
+                returnKeyType="done"
+                onSubmitEditing={handleSignIn}
+              />
+              <TouchableOpacity 
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.passwordToggle}
+              >
+                <Ionicons 
+                  name={showPassword ? "eye-off-outline" : "eye-outline"} 
+                  size={24} 
+                  color={COLORS.gray} 
+                />
+              </TouchableOpacity>
+            </View>
 
-          {/* Sign In Button */}
-          <TouchableOpacity 
-            style={[styles.button, isLoading && styles.disabledButton]} 
-            onPress={handleSignIn}
-            disabled={isLoading}
-            testID="signInButton"
-          >
-            {isLoading ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Text style={styles.buttonText}>Sign In</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* Social Sign In */}
-          <View style={styles.orContainer}>
-            <View style={styles.divider} />
-            <Text style={styles.orText}>OR</Text>
-            <View style={styles.divider} />
-          </View>
-
-          <View style={styles.socialButtonsContainer}>
-            {/* Google */}
+            {/* Forgot Password */}
             <TouchableOpacity 
-              style={styles.socialButton} 
-              onPress={handleGoogleSignIn}
-              testID="googleSignInButton"
+              style={styles.forgotPasswordContainer} 
+              onPress={handleForgotPassword}
+              testID="forgotPasswordButton"
             >
-              <Ionicons name="logo-google" size={24} color="#DB4437" />
-              <Text style={styles.socialButtonText}>Google</Text>
+              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
             </TouchableOpacity>
 
-            {/* Apple */}
+            {/* Sign In Button */}
             <TouchableOpacity 
-              style={styles.socialButton} 
-              onPress={handleAppleSignIn}
-              testID="appleSignInButton"
+              style={[styles.button, isLoading && styles.disabledButton]} 
+              onPress={handleSignIn}
+              disabled={isLoading}
+              testID="signInButton"
             >
-              <Ionicons name="logo-apple" size={24} color="#000000" />
-              <Text style={styles.socialButtonText}>Apple</Text>
+              {isLoading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.buttonText}>Sign In</Text>
+              )}
             </TouchableOpacity>
 
-            {/* Facebook */}
+            {/* Social Sign In */}
+            <View style={styles.orContainer}>
+              <View style={styles.divider} />
+              <Text style={styles.orText}>OR</Text>
+              <View style={styles.divider} />
+            </View>
+
+            <View style={styles.socialButtonsContainer}>
+              {/* Google */}
+              <TouchableOpacity 
+                style={styles.socialButton} 
+                onPress={handleGoogleSignIn}
+                testID="googleSignInButton"
+              >
+                <Ionicons name="logo-google" size={24} color="#DB4437" />
+                <Text style={styles.socialButtonText}>Google</Text>
+              </TouchableOpacity>
+
+              {/* Apple */}
+              <TouchableOpacity 
+                style={styles.socialButton} 
+                onPress={handleAppleSignIn}
+                testID="appleSignInButton"
+              >
+                <Ionicons name="logo-apple" size={24} color="#000000" />
+                <Text style={styles.socialButtonText}>Apple</Text>
+              </TouchableOpacity>
+
+              {/* Facebook */}
+              <TouchableOpacity 
+                style={styles.socialButton} 
+                onPress={handleFacebookSignIn}
+                testID="facebookSignInButton"
+              >
+                <Ionicons name="logo-facebook" size={24} color="#4267B2" />
+                <Text style={styles.socialButtonText}>Facebook</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Guest Mode */}
             <TouchableOpacity 
-              style={styles.socialButton} 
-              onPress={handleFacebookSignIn}
-              testID="facebookSignInButton"
+              style={[styles.button, {backgroundColor: COLORS.primary, marginTop: 10}]} 
+              onPress={handleGuestMode}
+              testID="guestModeButton"
             >
-              <Ionicons name="logo-facebook" size={24} color="#4267B2" />
-              <Text style={styles.socialButtonText}>Facebook</Text>
+              <Text style={styles.buttonText}>Go to Route Planner</Text>
             </TouchableOpacity>
+
+            {/* Sign Up Link */}
+            <View style={styles.signUpContainer}>
+              <Text style={styles.signUpText}>Don't have an account? </Text>
+              <TouchableOpacity onPress={() => {
+                console.log('Navigate to Sign Up');
+                navigation.navigate('SignUp');
+              }}>
+                <Text style={styles.link}>Sign Up</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-
-          {/* Guest Mode */}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  } catch (error) {
+    console.error('Error rendering SignInScreen:', error);
+    // Fallback UI in case of error
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#FFF8E1' }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={{ fontSize: 24, color: '#2E7D32', marginBottom: 20 }}>RoamEasy</Text>
+          <Text style={{ fontSize: 16, marginBottom: 20, textAlign: 'center' }}>
+            There was a problem loading the sign in screen.
+          </Text>
           <TouchableOpacity 
-            style={styles.guestButton} 
-            onPress={handleGuestMode}
-            testID="guestModeButton"
+            style={{ 
+              marginTop: 10,
+              backgroundColor: '#2E7D32',
+              padding: 15,
+              borderRadius: 8,
+              width: '80%',
+              alignItems: 'center'
+            }}
+            onPress={() => {
+              // Try to continue as guest - we're in the catch block so need to import again
+              try {
+                const { continueAsGuest } = require('../hooks/useAuth').default();
+                if (continueAsGuest) {
+                  continueAsGuest();
+                }
+              } catch (err) {
+                console.error('Failed to continue as guest:', err);
+              }
+            }}
           >
-            <Text style={styles.guestButtonText}>Continue as Guest</Text>
+            <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>Continue as Guest</Text>
           </TouchableOpacity>
-
-          {/* Sign Up Link */}
-          <View style={styles.signUpContainer}>
-            <Text style={styles.signUpText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={() => {
-              console.log('Navigate to Sign Up');
-              navigation.navigate('SignUp');
-            }}>
-              <Text style={styles.link}>Sign Up</Text>
-            </TouchableOpacity>
-          </View>
         </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
+      </SafeAreaView>
+    );
+  }
 });
 
 const styles = StyleSheet.create({

@@ -7,6 +7,7 @@ import MapsService, {
 import OfflineService from '../services/OfflineService';
 import OpenAIService from '../services/OpenAIService';
 import { useNetInfo } from '@react-native-community/netinfo';
+import { GOOGLE_MAPS_API_KEY } from '../utils/environment';
 
 export interface MapsState {
   route: Route | null;
@@ -118,104 +119,70 @@ export default function useMaps() {
   // Get resort suggestions near a stop
   const getResortSuggestions = useCallback(async (location: RouteLocation, preferences: any) => {
     setState(prevState => ({ ...prevState, isLoading: true, error: null }));
-    
+    let resortsToReturn: any[] = [];
+
     try {
-      if (!isConnected) {
-        throw new Error('Internet connection required for resort suggestions');
-      }
-      
-      // Validate that location and location.coordinates exist and have valid latitude/longitude
       if (!location || !location.coordinates || 
           typeof location.coordinates.latitude !== 'number' || 
           typeof location.coordinates.longitude !== 'number') {
         throw new Error('Invalid location: missing valid coordinates');
       }
       
-      console.log(`Getting resort suggestions near ${location.coordinates.latitude},${location.coordinates.longitude}`);
+      console.log(`Getting resort suggestions near ${location.coordinates.latitude},${location.coordinates.longitude} using Places API`);
       
-      // Extract city and state from the address if possible
-      let cityState = "";
-      if (location.address) {
-        const addressParts = location.address.split(',').map(part => part.trim());
-        if (addressParts.length >= 2) {
-          cityState = `${addressParts[0]}, ${addressParts[1]}`;
+      const { places, error } = await MapsService.searchNearbyPlaces(location.coordinates);
+      if (error) throw error;
+      
+      if (places && places.length > 0) {
+        console.log(`Found ${places.length} nearby places.`);
+        if (places[0]) {
+          console.log('Raw structure of first place result:', JSON.stringify(places[0], null, 2));
         }
-      }
-      
-      let resorts = [];
-      
-      // Try searching with the address first if we have a city/state
-      if (cityState) {
-        console.log(`Searching for RV parks in ${cityState}`);
-        const { locations } = await MapsService.searchLocation(`RV parks campgrounds in ${cityState}`);
         
-        if (locations && locations.length > 0) {
-          console.log(`Found ${locations.length} locations for query: RV parks in ${cityState}`);
-          resorts = locations.map(loc => ({
-            coordinates: {
-              latitude: loc.coordinates.latitude,
-              longitude: loc.coordinates.longitude
-            },
-            address: loc.address
-          }));
-        }
-      }
-      
-      // If no results, try with coordinates
-      if (resorts.length === 0) {
-        console.log("No results with city/state, trying with coordinates");
-        const { locations } = await MapsService.searchLocation(
-          `RV parks near ${location.coordinates.latitude},${location.coordinates.longitude}`
-        );
-        
-        if (locations && locations.length > 0) {
-          console.log(`Found ${locations.length} locations with coordinates search`);
-          resorts = locations.map(loc => ({
-            coordinates: {
-              latitude: loc.coordinates.latitude,
-              longitude: loc.coordinates.longitude
-            },
-            address: loc.address
-          }));
-        }
-      }
-      
-      // If still no results, use mock data for testing
-      if (resorts.length === 0) {
-        console.log("No results found, using mock data");
-        
-        // Create 3 mock resorts around the given location
-        resorts = [
-          {
-            coordinates: {
-              latitude: location.coordinates.latitude + 0.01,
-              longitude: location.coordinates.longitude + 0.01
-            },
-            address: "Sunny Valley RV Resort, Near " + (location.address || "Your Location")
-          },
-          {
-            coordinates: {
-              latitude: location.coordinates.latitude - 0.01,
-              longitude: location.coordinates.longitude - 0.01
-            },
-            address: "Mountain View Campground, Near " + (location.address || "Your Location")
-          },
-          {
-            coordinates: {
-              latitude: location.coordinates.latitude,
-              longitude: location.coordinates.longitude + 0.02
-            },
-            address: "Riverside RV Park, Near " + (location.address || "Your Location")
+        // Map the Places API result 
+        resortsToReturn = places.map((place: any) => {
+          const apiKey = GOOGLE_MAPS_API_KEY; 
+          const photoRef = place.photos?.[0]?.photo_reference;
+          const imageUrl = photoRef && apiKey 
+            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photoRef}&key=${apiKey}` 
+            : null;
+
+          // ---> CAREFUL MAPPING <--- 
+          const resortName = place.name || 'Name Unknown'; // Explicitly get name
+          const resortAddress = place.vicinity || place.formatted_address || 'Address Unknown'; // Use vicinity or fallback
+          const resortLat = place.geometry?.location?.lat;
+          const resortLng = place.geometry?.location?.lng;
+          const resortRating = place.rating || 0;
+          const resortTypes = place.types || [];
+
+          // Basic validation
+          if (!place.place_id || typeof resortLat !== 'number' || typeof resortLng !== 'number') {
+             console.warn('Skipping place due to missing ID or coordinates:', place);
+             return null; // Skip this place if essential data is missing
           }
-        ];
+
+          return {
+            id: place.place_id, 
+            name: resortName, // Use the variable
+            address: resortAddress, // Use the variable
+            coordinates: {
+              latitude: resortLat,
+              longitude: resortLng
+            },
+            rating: resortRating, 
+            amenities: resortTypes, 
+            nightly_rate: null, // Placeholder
+            phone: null, // Placeholder
+            website: null, // Placeholder
+            image_url: imageUrl,
+            last_updated: new Date().toISOString()
+          };
+        }).filter(resort => resort !== null); // Filter out any skipped null entries
+      } else {
+        console.log("No nearby places found by Places API.");
+        resortsToReturn = [];
       }
       
-      setState(prevState => ({
-        ...prevState,
-        isLoading: false,
-      }));
-      
-      return { success: true, resorts };
     } catch (error) {
       console.error("Error in getResortSuggestions:", error);
       setState(prevState => ({
@@ -223,28 +190,35 @@ export default function useMaps() {
         isLoading: false,
         error: error as Error,
       }));
-      
-      // Return mock data even if there's an error, to ensure the user can proceed
-      const mockResorts = [
+      // Keep the mock data return in the catch block as a final fallback
+      resortsToReturn = [ /* ... same fallback resorts as before ... */ 
         {
-          coordinates: {
-            latitude: location.coordinates.latitude + 0.01, 
-            longitude: location.coordinates.longitude + 0.01
-          },
-          address: "Fallback RV Resort, Near " + (location.address || "Your Location")
+          id: 'fallback-1',
+          name: "Fallback RV Resort",
+          address: "Near " + (location.address || "Your Location"),
+          coordinates: { latitude: location.coordinates.latitude + 0.01, longitude: location.coordinates.longitude + 0.01 },
+          rating: 3.5, amenities: ['Fallback'], nightly_rate: 50, last_updated: new Date().toISOString()
         },
         {
-          coordinates: {
-            latitude: location.coordinates.latitude - 0.01,
-            longitude: location.coordinates.longitude - 0.01
-          },
-          address: "Emergency Campground, Near " + (location.address || "Your Location")
+          id: 'fallback-2',
+          name: "Emergency Campground",
+          address: "Near " + (location.address || "Your Location"),
+          coordinates: { latitude: location.coordinates.latitude - 0.01, longitude: location.coordinates.longitude - 0.01 },
+          rating: 3.0, amenities: ['Fallback'], nightly_rate: 40, last_updated: new Date().toISOString()
         }
       ];
-      
-      return { success: true, resorts: mockResorts };
+    } finally {
+        setState(prevState => ({
+          ...prevState,
+          isLoading: false,
+        }));
     }
-  }, [isConnected]);
+    // ---> Log the final mapped resorts just before returning <---
+    console.log('Final mapped resorts to return:', JSON.stringify(resortsToReturn.slice(0, 2), null, 2)); // Log first 2 for brevity
+    
+    // Return the result outside the try/catch/finally
+    return { success: true, resorts: resortsToReturn }; 
+  }, []);
 
   // Get directions between two points
   const getDirections = useCallback(async (from: RouteLocation, to: RouteLocation) => {

@@ -1,19 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createClient, Session, User } from '@supabase/supabase-js';
+import { Session, User, AuthSession } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@env';
 import SupabaseService from '../services/SupabaseService';
-import { AuthSession } from '@supabase/supabase-js';
-
-// Use environment variables
-const supabaseUrl = SUPABASE_URL || '';
-const supabaseAnonKey = SUPABASE_ANON_KEY || '';
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables');
-}
-
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export interface AuthUser {
   id: string;
@@ -29,6 +18,8 @@ export interface AuthState {
   error: Error | null;
   isGuest: boolean;
   hasSignedUp?: boolean;
+  lastUpdate?: number;
+  forceRefresh?: number;
 }
 
 // Helper function to check if two auth states are meaningfully different
@@ -98,141 +89,184 @@ const useAuth = () => {
     }
   }, []);
 
+  // Get the Supabase client instance from the service
+  const supabaseClient = SupabaseService.getClient();
+
   // Load user on mount
   useEffect(() => {
-    const fetchSession = async () => {
+    const restoreAuthState = async () => {
       try {
-        safeSetState(prev => ({ ...prev, isLoading: true }));
-        
-        // Check if user is in guest mode
-        const guestMode = await AsyncStorage.getItem('guest_mode');
-        const isGuest = guestMode === 'true';
-        
-        // Create a new state object
-        const newState = {
-          user: null,
-          session: null,
-          isAuthenticated: false,
-          isGuest,
-          isLoading: false,
-          error: null,
-        };
-        
-        // Explicitly update the stateRef first to avoid comparison issues
-        stateRef.current = newState;
-        
-        // Then update the state
-        setState(newState);
-        
-        // Log initialization success
-        console.log('Auth initialized:', { isGuest });
-        
-        // In a real app, we'd listen for auth state changes:
-        // const { data: authListener } = SupabaseService.onAuthStateChange((event, session) => {
-        //   setState(prev => ({
-        //     ...prev,
-        //     user: session?.user || null,
-        //     session,
-        //     isAuthenticated: !!session?.user,
-        //   }));
-        // });
-        
-        // return () => {
-        //   authListener?.unsubscribe();
+        setState(prev => ({ ...prev, isLoading: true }));
+
+        // REMOVED OVERRIDE: Hardcode authentication to enable all features
+        // const hardcodedUser = {
+        //   id: '00000000-1111-2222-3333-444444444444',
+        //   email: 'authenticated@user.com',
+        //   app_metadata: {},
+        //   user_metadata: {},
+        //   created_at: new Date().toISOString()
         // };
+        // 
+        // console.log('HARDCODED AUTHENTICATION ENABLED');
+        // setState(prev => ({
+        //   ...prev,
+        //   user: hardcodedUser as User,
+        //   isAuthenticated: true, 
+        //   isGuest: false,
+        //   isLoading: false
+        // }));
+        // 
+        // return;
+
+        // Restore original logic: Check AsyncStorage and Supabase session
+        console.log("Restoring authentication state...");
+        const guestMode = await AsyncStorage.getItem('guest_mode');
+        
+        if (guestMode === 'true') {
+          console.log("Found guest mode flag in storage.");
+          setState(prev => ({ ...prev, isGuest: true, isAuthenticated: false, user: null, isLoading: false }));
+        } else {
+          console.log("No guest mode flag found, checking Supabase session.");
+          const { data, error } = await SupabaseService.getCurrentUser();
+          
+          if (error) {
+            console.error("Error getting current user:", error);
+            setState(prev => ({ ...prev, isAuthenticated: false, user: null, isLoading: false, error }));
+          } else if (data?.user) {
+            console.log("Found active Supabase session for user:", data.user.id);
+            setState(prev => ({ ...prev, isAuthenticated: true, user: data.user, isLoading: false }));
+          } else {
+            console.log("No active Supabase session found.");
+            setState(prev => ({ ...prev, isAuthenticated: false, user: null, isLoading: false }));
+          }
+        }
       } catch (error) {
-        console.error('Error initializing auth:', error);
-        
-        // Create a fallback state
-        const fallbackState = {
-          user: null,
-          session: null,
-          isAuthenticated: false,
-          isGuest: false,
-          isLoading: false,
-          error: error as Error,
-        };
-        
-        // Update the ref directly
-        stateRef.current = fallbackState;
-        
-        // Update the state directly
-        setState(fallbackState);
+        console.error('Error restoring auth state:', error);
+        setState(prev => ({ ...prev, isLoading: false, error: error as Error }));
       }
     };
 
-    // Run immediate initialization
-    console.log('Auth hook initializing...');
-    fetchSession();
-  }, []);
+    restoreAuthState();
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    try {
-      safeSetState(prev => ({ ...prev, isLoading: true, error: null }));
+    // Listen for Supabase auth changes USING THE SERVICE'S CLIENT
+    const { data: authListener } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
+      console.log('[onAuthStateChange] Event:', event);
+      console.log('[onAuthStateChange] Session:', session ? `User ID: ${session.user.id}` : 'null');
       
-      // Use the actual Supabase service
-      const result = await SupabaseService.signIn(email, password);
-      if (result.error) throw result.error;
+      const user = session?.user ?? null;
+      const isAuthenticated = !!user;
+      console.log(`[onAuthStateChange] Calculated state: isAuthenticated=${isAuthenticated}, User=${user ? user.id : 'null'}`);
       
-      // Update state with user info
-      if (result.user) {
-        safeSetState(prev => ({
-          ...prev,
-          user: result.user as unknown as User,
-          isAuthenticated: true,
-          isLoading: false,
-          isGuest: false
-        }));
-        return { success: true };
-      } else {
-        throw new Error('Sign in failed - no user returned');
+      // Always clear guest mode flag if we get an auth event
+      try {
+        await AsyncStorage.removeItem('guest_mode');
+        console.log('[onAuthStateChange] Cleared guest_mode flag.');
+      } catch (e) {
+        console.error('[onAuthStateChange] Failed to clear guest_mode:', e);
       }
+      
+      // Capture previous state for comparison
+      const prevState = stateRef.current;
+      console.log('[onAuthStateChange] Previous state:', { isAuth: prevState.isAuthenticated, userId: prevState.user?.id });
+
+      setState(prev => {
+        const newState = { 
+          ...prev, 
+          user: user ? transformUser(user) : null, 
+          session: session, 
+          isAuthenticated, 
+          isGuest: false, // Explicitly set guest to false on auth change
+          isLoading: false,
+          error: null 
+        };
+        console.log('[onAuthStateChange] Attempting to set new state:', { isAuth: newState.isAuthenticated, userId: newState.user?.id });
+        return newState;
+      });
+    });
+
+    return () => {
+      // Clean up the listener
+      if (authListener?.subscription) {
+        authListener.subscription.unsubscribe();
+      }
+    };
+  }, [supabaseClient]);
+
+  const signIn = async (email: string, password: string): Promise<{ success: boolean; error: Error | null }> => {
+    try {
+      setState(prev => ({ ...prev, isLoading: true }));
+
+      console.log('Signing in with email/password...');
+      
+      // Make sure we clear any guest mode data first
+      try {
+        await AsyncStorage.removeItem('guest_mode');
+        console.log('Cleared guest mode flag during sign in');
+      } catch (storageError) {
+        console.error('Error clearing guest mode flag:', storageError);
+      }
+      
+      const { user, error } = await SupabaseService.signIn(email, password);
+
+      if (error) {
+        console.error('SIGNIN ERROR:', error);
+        setState(prev => ({ ...prev, isLoading: false }));
+        return { success: false, error };
+      }
+
+      if (user) {
+        console.log('SIGNIN SUCCESS:', user.id);
+        
+        // Let onAuthStateChange handle state update
+        // Force update local storage for auth state - REMOVED - handled by listener
+        // try {
+        //   await AsyncStorage.setItem('user_authenticated', 'true');
+        //   await AsyncStorage.setItem('auth_timestamp', Date.now().toString());
+        //   await AsyncStorage.removeItem('guest_mode');
+        //   console.log('Updated auth storage flags');
+        // } catch (storageError) {
+        //   console.error('Error updating auth storage:', storageError);
+        // }
+        
+        // setState(prev => ({
+        //   ...prev,
+        //   user,
+        //   isAuthenticated: true,
+        //   isGuest: false,
+        //   isLoading: false
+        // }));
+        
+        return { success: true, error: null };
+      }
+
+      setState(prev => ({ ...prev, isLoading: false }));
+      return { success: false, error: new Error('No user returned from sign in') };
     } catch (error) {
-      safeSetState(prev => ({ ...prev, isLoading: false, error: error as Error }));
+      console.error('SIGNIN EXCEPTION:', error);
+      setState(prev => ({ ...prev, isLoading: false, error: error as Error }));
       return { success: false, error: error as Error };
     }
-  }, [safeSetState]);
+  };
 
   const signUp = useCallback(async (email: string, password: string, fullName?: string) => {
     try {
       safeSetState(prev => ({ ...prev, isLoading: true, error: null }));
       
-      // Use the actual Supabase service
       const result = await SupabaseService.signUp(email, password);
       if (result.error) throw result.error;
       
-      // Update profile with full name if provided
       if (result.user && fullName) {
         try {
           await SupabaseService.updateProfile(result.user.id, { full_name: fullName });
         } catch (profileError) {
           console.error('Failed to update profile:', profileError);
-          // Continue anyway as the user was created successfully
         }
       }
       
-      // Update state with user info - FORCE a state change that will trigger navigation
+      // Let onAuthStateChange handle the state update for SIGNED_IN event
       if (result.user) {
-        console.log('SIGNUP SUCCESS - Updating auth state to authenticated', result.user.id);
-        
-        // Create a new state object and directly update both state and ref
-        const newAuthState = {
-          user: result.user as unknown as User,
-          session: null, // We don't have a session yet
-          isAuthenticated: true, // This is the key part for navigation
-          isLoading: false,
-          error: null,
-          isGuest: false,
-          hasSignedUp: true
-        };
-        
-        // Update the ref directly first
-        stateRef.current = newAuthState;
-        
-        // Then update the state
-        setState(newAuthState);
-        
-        console.log('Auth state updated after signup:', { isAuthenticated: true, userId: result.user.id });
+        console.log('SIGNUP SUCCESS - User created:', result.user.id);
+        // No direct state update here - listener will handle it.
         return { success: true };
       } else {
         throw new Error('Sign up failed - no user returned');
@@ -246,60 +280,120 @@ const useAuth = () => {
 
   const signOut = useCallback(async () => {
     try {
-      safeSetState(prev => ({ ...prev, isLoading: true, error: null }));
+      console.log('Starting sign out process...');
       
-      // Use the actual Supabase service
-      const result = await SupabaseService.signOut();
-      if (result.error) throw result.error;
-      
-      // Clear guest mode from AsyncStorage
-      await AsyncStorage.removeItem('guest_mode');
-      
-      // Reset state
-      safeSetState({
+      // Immediately update the auth state to trigger navigation
+      // Create a new state object for the signed-out state
+      const newAuthState = {
         user: null,
         session: null,
         isAuthenticated: false,
         isLoading: false,
         error: null,
-        isGuest: false
-      });
+        isGuest: false,
+        hasSignedUp: false
+      };
+      
+      // Update the ref directly first
+      stateRef.current = newAuthState;
+      
+      // Then update the state directly - NOT using safeSetState
+      console.log('Setting auth state to signed out');
+      setState(newAuthState);
+      
+      // Clear guest mode from AsyncStorage
+      await AsyncStorage.removeItem('guest_mode');
+      
+      // Use the actual Supabase service
+      const result = await SupabaseService.signOut();
+      if (result.error) throw result.error;
       
       return { success: true };
     } catch (error) {
+      console.error('Error in signOut:', error);
       safeSetState(prev => ({ ...prev, isLoading: false, error: error as Error }));
       return { success: false, error: error as Error };
     }
-  }, [safeSetState]);
+  }, []);
 
   // Continue as guest
   const continueAsGuest = useCallback(async () => {
     try {
-      safeSetState(prev => ({ ...prev, isLoading: true }));
+      console.log('GUEST MODE - Direct auth state update');
+      
+      // Set guest mode in AsyncStorage
       await AsyncStorage.setItem('guest_mode', 'true');
-      safeSetState(prev => ({ 
-        ...prev, 
+      
+      // Create a new state object and directly update both state and ref
+      const newAuthState = {
+        user: null,
+        session: null,
         isAuthenticated: false,
         isGuest: true,
-        user: null, 
-        session: null 
-      }));
+        isLoading: false,
+        error: null,
+        hasSignedUp: false
+      };
+      
+      // Update the ref directly first
+      stateRef.current = newAuthState;
+      
+      // Then update the state directly (bypass safeSetState)
+      setState(newAuthState);
+      
+      console.log('Auth state updated for guest mode:', { isGuest: true });
       return { success: true };
     } catch (error) {
+      console.error('Error setting guest mode:', error);
       return { 
         success: false, 
         error: error instanceof Error ? error : new Error('Guest mode failed') 
       };
-    } finally {
-      safeSetState(prev => ({ ...prev, isLoading: false }));
     }
-  }, [safeSetState]);
+  }, []);
+
+  // Force refresh auth state
+  const forceRefreshAuth = useCallback(async () => {
+    try {
+      console.log('FORCE REFRESHING AUTH STATE');
+      
+      // Check if user is in guest mode
+      const guestMode = await AsyncStorage.getItem('guest_mode');
+      const isGuest = guestMode === 'true';
+      
+      // Create a new state object with the current guest status
+      const newAuthState = {
+        user: null,
+        session: null,
+        isAuthenticated: false,
+        isGuest,
+        isLoading: false,
+        error: null,
+        lastUpdate: Date.now() // Force a re-render
+      };
+      
+      // Update the ref directly first
+      stateRef.current = newAuthState;
+      
+      // Then update the state directly
+      setState(newAuthState);
+      
+      console.log('Auth state refreshed:', { isGuest });
+      return { success: true };
+    } catch (error) {
+      console.error('Error refreshing auth state:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error : new Error('Auth refresh failed') 
+      };
+    }
+  }, []);
 
   // Sign in with Google
   const signInWithGoogle = useCallback(async () => {
     try {
       safeSetState(prev => ({ ...prev, isLoading: true }));
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'google',
       });
 
@@ -322,7 +416,7 @@ const useAuth = () => {
   const signInWithApple = useCallback(async () => {
     try {
       safeSetState(prev => ({ ...prev, isLoading: true }));
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'apple',
       });
 
@@ -345,7 +439,7 @@ const useAuth = () => {
   const signInWithFacebook = useCallback(async () => {
     try {
       safeSetState(prev => ({ ...prev, isLoading: true }));
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'facebook',
       });
 
@@ -368,7 +462,7 @@ const useAuth = () => {
   const resetPassword = useCallback(async (email: string) => {
     try {
       safeSetState(prev => ({ ...prev, isLoading: true }));
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
         redirectTo: 'roameasy://reset-password',
       });
 
@@ -397,7 +491,17 @@ const useAuth = () => {
     signInWithApple,
     signInWithFacebook,
     resetPassword,
+    forceRefreshAuth
   };
 };
+
+// Helper to transform Supabase user to our format
+function transformUser(supabaseUser: any): User {
+  return {
+    id: supabaseUser.id,
+    email: supabaseUser.email,
+    // Add other fields as needed
+  };
+}
 
 export default useAuth; 

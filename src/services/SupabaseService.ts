@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../utils/environment';
 import { Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Types
 export interface User {
@@ -100,6 +101,11 @@ class SupabaseService {
     return SupabaseService.instance;
   }
 
+  // Add this method to expose the client instance
+  public getClient(): SupabaseClient {
+    return this.supabase;
+  }
+
   // Authentication methods
   async signUp(email: string, password: string): Promise<{ user: User | null; error: Error | null }> {
     try {
@@ -146,31 +152,14 @@ class SupabaseService {
   async signIn(email: string, password: string): Promise<{ user: User | null; error: Error | null }> {
     try {
       console.log('Attempting sign in for:', email);
+      
       const { data, error } = await this.supabase.auth.signInWithPassword({
         email,
         password,
       });
       
       if (error) {
-        console.error('Sign in error from Supabase:', error.message);
-        
-        // Handle specific error cases
-        if (error.message.includes('Email not confirmed')) {
-          console.log('Email not confirmed error - attempting to auto-confirm...');
-          
-          // Try to update user to mark as confirmed
-          try {
-            // This would require admin access, which we don't have in the client
-            // Instead, we'll just return a more user-friendly error
-            return { 
-              user: null, 
-              error: new Error('Your email is pending confirmation. Please check your inbox or try again later.') 
-            };
-          } catch (adminError) {
-            console.error('Failed to auto-confirm user:', adminError);
-          }
-        }
-        
+        console.log('Sign in error encountered:', error.message);
         throw error;
       }
       
@@ -179,7 +168,7 @@ class SupabaseService {
         return { user: this.transformUser(data.user), error: null };
       }
       
-      return { user: null, error: new Error('Sign in failed') };
+      return { user: null, error: new Error('Sign in failed - invalid credentials') };
     } catch (error) {
       console.error('Sign in error:', error);
       return { user: null, error: error as Error };
@@ -309,160 +298,125 @@ class SupabaseService {
     }
   }
 
-  async getTripById(tripId: string): Promise<{ trip: Trip | null; error: Error | null }> {
+  async getTrip(tripId: string): Promise<Trip | null> {
     try {
-      console.log('Fetching trip with ID:', tripId);
+      console.log(`Getting trip with ID: ${tripId}`);
       
-      // Get the trip with its stops
-      const { data, error } = await this.supabase
+      // First check if we have a cached copy
+      try {
+        const cachedTripStr = await AsyncStorage.getItem(`trip_${tripId}`);
+        console.log(`Retrieved cached trip ${tripId} with raw data:`, cachedTripStr?.substring(0, 100) + '...');
+        
+        if (cachedTripStr) {
+          const cachedTrip = JSON.parse(cachedTripStr);
+          console.log(`Parsed cached trip ${tripId} with ${cachedTrip.stops?.length || 0} stops`);
+          
+          // Return the cached trip if it has stops
+          if (cachedTrip.stops && cachedTrip.stops.length > 0) {
+            return cachedTrip as Trip;
+          } else {
+            console.log(`Cached trip ${tripId} has no stops, trying Supabase`);
+          }
+        }
+      } catch (cacheError) {
+        console.error('Error retrieving trip from cache:', cacheError);
+      }
+      
+      // If no valid cache, try to get from Supabase
+      console.log('Fetching trip from Supabase:', tripId);
+      
+      // First get the trip record
+      const { data: trip, error: tripError } = await this.supabase
         .from('trips')
-        .select(`
-          *,
-          trip_stops(*)
-        `)
+        .select('*')
         .eq('id', tripId)
         .single();
       
-      if (error) {
-        console.error('Error fetching trip:', error);
-        throw error;
+      if (tripError) {
+        console.error('Error fetching trip from Supabase:', tripError);
+        return null;
       }
       
-      if (!data) {
-        console.log('No trip found with ID:', tripId);
-        return { trip: null, error: null };
-      }
-      
-      // Get the stops separately to ensure we have them
-      const { data: stopData, error: stopError } = await this.supabase
+      // Then get the stops for this trip
+      const { data: stops, error: stopsError } = await this.supabase
         .from('trip_stops')
         .select('*')
         .eq('trip_id', tripId)
         .order('stop_order', { ascending: true });
-        
-      if (stopError) {
-        console.error('Error fetching trip stops:', stopError);
+      
+      if (stopsError) {
+        console.error('Error fetching stops for trip:', stopsError);
+        // Return trip without stops
+        return trip;
       }
       
-      // Use stops from the direct query if available
-      const stops = stopData || [];
-      console.log(`Found ${stops.length} stops for trip ${tripId} from direct query`);
+      // Combine trip with stops
+      const tripWithStops: Trip = {
+        ...trip,
+        stops: stops || []
+      };
       
-      // Transform the result to match our Trip interface
-      const trip = {
-        ...data,
-        stops: stops // Use the directly queried stops
-      } as Trip;
+      // Cache the trip with stops for future use
+      try {
+        await AsyncStorage.setItem(`trip_${tripId}`, JSON.stringify(tripWithStops));
+        console.log(`Cached trip ${tripId} with ${stops?.length || 0} stops`);
+      } catch (cacheError) {
+        console.error('Error caching trip:', cacheError);
+      }
       
-      console.log('Trip retrieved successfully with', trip.stops?.length || 0, 'stops');
-      
-      return { trip, error: null };
+      return tripWithStops;
     } catch (error) {
-      console.error('Error in getTripById:', error);
-      return { trip: null, error: error as Error };
+      console.error('Exception in getTrip:', error);
+      return null;
+    }
+  }
+
+  // the RLS policies to identify guest requests
+  public async setupGuestAuth() {
+    try {
+      // If we already have a session, check if it's valid
+      const { data: session } = await this.supabase.auth.getSession();
+      if (session?.session) {
+        console.log('Using existing session for auth');
+        return;
+      }
+
+      // For guest users, create a temporary anonymous session
+      console.log('Setting up guest auth via anonymous sign-in');
+      const { data, error } = await this.supabase.auth.signInAnonymously();
+      
+      if (error) {
+        console.error('Error setting up anonymous auth:', error);
+      } else {
+        console.log('Anonymous auth session created');
+      }
+    } catch (error) {
+      console.error('Error setting up guest auth:', error);
     }
   }
 
   async createTrip(tripData: any): Promise<{ trip: Trip | null; error: Error | null }> {
     try {
-      console.log('Creating trip with data:', JSON.stringify(tripData, null, 2));
-      
-      // Check for required fields
-      if (!tripData.user_id) {
-        console.error('Missing required field: user_id');
-        return { trip: null, error: new Error('Missing required field: user_id') };
-      }
-      
-      if (!tripData.name) {
-        console.error('Missing required field: name');
-        return { trip: null, error: new Error('Missing required field: name') };
-      }
-      
-      // Save the stops array
-      const stops = tripData.stops || [];
-      console.log(`Trip has ${stops.length} stops for creation`);
-      
-      // Create trip without stops
-      const tripWithoutStops = { ...tripData };
-      delete tripWithoutStops.stops;
-      
-      console.log('Inserting trip data:', JSON.stringify(tripWithoutStops, null, 2));
-      
-      // Create the trip
+      // Use the full tripData provided by the caller
+      console.log('Attempting full trip insert:', JSON.stringify(tripData, null, 2));
+
       const { data, error } = await this.supabase
         .from('trips')
-        .insert(tripWithoutStops)
+        .insert(tripData) // Use full data again
         .select()
         .single();
       
       if (error) {
-        console.error('Error creating trip:', error);
-        return { trip: null, error: new Error(`Database error: ${error.message}`) };
+        console.error('----> Detailed Supabase Error creating trip:', JSON.stringify(error, null, 2)); 
+        throw error;
       }
       
-      if (!data) {
-        return { trip: null, error: new Error('Failed to create trip - no data returned') };
-      }
-      
-      const newTrip = data as Trip;
-      console.log('Trip created successfully:', newTrip);
-      
-      // Now add stops one by one if there are any
-      if (stops.length > 0) {
-        console.log(`Adding ${stops.length} stops to trip ${newTrip.id}`);
-        
-        // Add each stop individually
-        const createdStops = [];
-        for (const stop of stops) {
-          // Extract only the data that matches our database schema
-          const stopData = {
-            stop_order: stop.stop_order || 0,
-            check_in: stop.check_in || new Date().toISOString().split('T')[0],
-            check_out: stop.check_out || new Date().toISOString().split('T')[0],
-            notes: stop.notes || '',
-            resort_id: stop.resort_id || '00000000-0000-4000-8000-000000000000'
-          };
-          
-          // If there's a location object in the stop, add it to notes
-          if (stop.location) {
-            const locationInfo = `${stop.location.address || ''} (${stop.location.latitude || 0}, ${stop.location.longitude || 0})`;
-            stopData.notes = stopData.notes ? `${stopData.notes}\nLocation: ${locationInfo}` : `Location: ${locationInfo}`;
-          }
-          
-          console.log(`Adding stop with order ${stopData.stop_order}`);
-          const { stop: createdStop, error: stopError } = await this.addTripStop(newTrip.id, stopData);
-          
-          if (stopError) {
-            console.error('Error adding stop:', stopError);
-          } else if (createdStop) {
-            createdStops.push(createdStop);
-            console.log('Stop created successfully:', createdStop);
-          }
-        }
-        
-        // Get the updated trip with stops
-        const { data: tripWithStops, error: getError } = await this.supabase
-          .from('trips')
-          .select(`
-            *,
-            trip_stops (*)
-          `)
-          .eq('id', newTrip.id)
-          .single();
-          
-        if (!getError && tripWithStops) {
-          const completeTrip = {
-            ...tripWithStops,
-            stops: tripWithStops.trip_stops || []
-          };
-          console.log('Retrieved complete trip with stops:', completeTrip.stops?.length || 0);
-          return { trip: completeTrip as Trip, error: null };
-        }
-      }
-      
-      return { trip: newTrip, error: null };
+      console.log(`Trip created successfully with ID: ${data.id}`);
+      // Return the full data returned by Supabase
+      return { trip: data as Trip, error: null }; 
+
     } catch (error) {
-      console.error('Error creating trip:', error);
+      console.error('Error creating trip:', error); // Updated log message
       return { trip: null, error: error as Error };
     }
   }
@@ -522,21 +476,27 @@ class SupabaseService {
     }
   }
 
-  async createTripStop(tripId: string, stopData: Omit<TripStop, 'id'>): Promise<{ stop: TripStop | null; error: Error | null }> {
+  async addTripStop(tripId: string, stopData: Omit<TripStop, 'id' | 'trip_id'>): Promise<{ stop: TripStop | null; error: Error | null }> {
     try {
+      console.log(`Adding stop to trip ${tripId}:`, stopData);
+      
+      // Original Supabase call
       const { data, error } = await this.supabase
         .from('trip_stops')
-        .insert({ ...stopData, trip_id: tripId })
+        .insert([{ trip_id: tripId, ...stopData }])
         .select()
         .single();
       
       if (error) {
+        console.error('Error creating stop in Supabase:', error);
         throw error;
       }
       
+      console.log(`Stop created with ID: ${data.id}`);
       return { stop: data as TripStop, error: null };
-    } catch (error) {
-      return { stop: null, error: error as Error };
+    } catch (err) {
+      console.error('Exception adding trip stop:', err);
+      return { stop: null, error: err as Error };
     }
   }
 
@@ -683,124 +643,6 @@ class SupabaseService {
       console.warn('Database check failed with error:', err);
       // Still return success to skip verification
       return { success: true };
-    }
-  }
-
-  // Helper method to add a trip stop (called from createTrip)
-  async addTripStop(tripId: string, stopData: Omit<TripStop, 'id' | 'trip_id'>): Promise<{ stop: TripStop | null; error: Error | null }> {
-    try {
-      console.log('Adding trip stop for trip:', tripId);
-      console.log('Stop data received:', JSON.stringify(stopData, null, 2));
-      
-      // Verify the trip exists first
-      console.log('Verifying trip exists before adding stop...');
-      const { data: tripExists, error: tripError } = await this.supabase
-        .from('trips')
-        .select('id')
-        .eq('id', tripId)
-        .single();
-      
-      if (tripError) {
-        console.error('Error verifying trip existence:', tripError);
-        throw new Error(`Trip verification failed: ${tripError.message}`);
-      }
-      
-      if (!tripExists) {
-        console.error('Trip not found when adding stop:', tripId);
-        throw new Error(`Trip with ID ${tripId} not found`);
-      }
-      
-      // Create a resort placeholder if needed
-      let resortId = stopData.resort_id;
-      
-      // If no resort_id is provided, generate a UUID using the Supabase UUID extension
-      if (!resortId) {
-        console.log('No resort ID provided, generating a new UUID');
-        
-        // Generate a UUID using Supabase
-        const { data: uuidData, error: uuidError } = await this.supabase
-          .rpc('generate_uuid');
-          
-        if (uuidError) {
-          console.error('Error generating UUID:', uuidError);
-          // Fallback to a client-side UUID generation approach
-          resortId = this.generateUUID();
-          console.log('Using client-side generated UUID:', resortId);
-        } else {
-          resortId = uuidData;
-          console.log('Using server-generated UUID:', resortId);
-        }
-      }
-      
-      // Check if the resort exists
-      console.log('Checking if resort exists:', resortId);
-      const { data: existingResort, error: resortError } = await this.supabase
-        .from('resorts')
-        .select('id')
-        .eq('id', resortId)
-        .single();
-      
-      // If resort doesn't exist, create a placeholder
-      if (!existingResort || resortError) {
-        console.log('Creating placeholder resort for stop with ID:', resortId);
-        
-        // Extract location info from notes if available
-        const locationData = this.extractLocationFromNotes(stopData.notes || '');
-        console.log('Extracted location data:', locationData);
-        
-        // Create the placeholder resort
-        const { data: newResort, error: createError } = await this.supabase
-          .from('resorts')
-          .insert({
-            id: resortId,
-            name: `Resort near ${locationData.address}`,
-            address: locationData.address,
-            latitude: locationData.latitude,
-            longitude: locationData.longitude,
-            rating: 0,
-            amenities: {},
-            phone: '',
-            website: ''
-          })
-          .select()
-          .single();
-        
-        if (createError) {
-          console.error('Error creating placeholder resort:', createError);
-          // Continue anyway, as the resort ID constraint might be set to CASCADE
-        } else {
-          console.log('Created placeholder resort:', newResort);
-        }
-      }
-      
-      // Extract only the fields that the database expects
-      const sanitizedData = {
-        trip_id: tripId,
-        resort_id: resortId,
-        stop_order: stopData.stop_order || 0,
-        check_in: stopData.check_in || new Date().toISOString().split('T')[0],
-        check_out: stopData.check_out || new Date().toISOString().split('T')[0],
-        notes: stopData.notes || ''
-      };
-      
-      console.log('Sanitized data for database insert:', JSON.stringify(sanitizedData, null, 2));
-      
-      const { data, error } = await this.supabase
-        .from('trip_stops')
-        .insert(sanitizedData)
-        .select()
-        .single();
-      
-      if (error) {
-        console.error('Error adding trip stop:', error);
-        throw error;
-      }
-      
-      console.log('Trip stop added successfully:', data);
-      return { stop: data as TripStop, error: null };
-    } catch (error) {
-      console.error('Error in addTripStop:', error);
-      return { stop: null, error: error as Error };
     }
   }
 

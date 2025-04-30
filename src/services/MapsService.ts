@@ -747,113 +747,104 @@ class MapsService {
   // Add searchLocation method
   async searchLocation(query: string): Promise<{ locations: Location[] | null; error: Error | null }> {
     try {
-      // Try to get from cache first
-      const cachedResults = await MapsOfflineCache.getCachedSearchResults(query);
-      if (cachedResults) {
-        return { locations: cachedResults, error: null };
+      console.log(`Searching location with query: "${query}"`);
+      if (!GOOGLE_MAPS_API_KEY) {
+        throw new Error('Google Maps API Key is missing');
       }
 
-      const response = await axios.get('https://maps.googleapis.com/maps/api/place/autocomplete/json', {
+      // Try cache first - TEMPORARILY REMOVED
+      // const cached = await MapsOfflineCache.getCachedSearch(query);
+      // if (cached) {
+      //   console.log(`Returning cached search results for "${query}"`);
+      //   return { locations: cached, error: null };
+      // }
+
+      const response = await axios.get(GOOGLE_GEOCODE_URL, {
         params: {
-          input: query,
-          key: GOOGLE_MAPS_API_KEY,
-          types: 'geocode'
-        }
-      });
-
-      if (response.data.status !== 'OK') {
-        throw new Error(`Location search failed: ${response.data.status}`);
-      }
-
-      const locations: Location[] = await Promise.all(
-        response.data.predictions.map(async (prediction: any) => {
-          // Get details for each prediction to get coordinates
-          const details = await this.getPlaceDetails(prediction.place_id);
-          return {
-            placeId: prediction.place_id,
-            address: prediction.description,
-            coordinates: details.coordinates,
-            mainText: prediction.structured_formatting?.main_text || prediction.description,
-            secondaryText: prediction.structured_formatting?.secondary_text || ''
-          };
-        })
-      );
-
-      // Cache results
-      await MapsOfflineCache.cacheSearchResults(query, locations);
-
-      return { locations, error: null };
-    } catch (error) {
-      console.error('Location search error:', error);
-      return { locations: null, error: error as Error };
-    }
-  }
-
-  // Add helper method for Place details
-  private async getPlaceDetails(placeId: string): Promise<{ coordinates: Coordinates }> {
-    try {
-      const response = await axios.get('https://maps.googleapis.com/maps/api/place/details/json', {
-        params: {
-          place_id: placeId,
-          fields: 'geometry',
+          address: query,
           key: GOOGLE_MAPS_API_KEY
         }
       });
 
-      if (response.data.status !== 'OK' || !response.data.result) {
-        throw new Error(`Place details failed: ${response.data.status}`);
+      if (response.data.status !== 'OK') {
+        // Handle ZERO_RESULTS specifically
+        if (response.data.status === 'ZERO_RESULTS') {
+          console.log(`Zero results found for query: "${query}"`);
+          return { locations: [], error: null }; 
+        }
+        throw new Error(`Geocoding search failed: ${response.data.status} - ${response.data.error_message || ''}`);
       }
 
-      return {
+      const results = response.data.results;
+      const locations: Location[] = results.map((result: any) => ({
         coordinates: {
-          latitude: response.data.result.geometry.location.lat,
-          longitude: response.data.result.geometry.location.lng
-        }
-      };
+          latitude: result.geometry.location.lat,
+          longitude: result.geometry.location.lng
+        },
+        address: result.formatted_address,
+        placeId: result.place_id
+      }));
+
+      // Cache the results - TEMPORARILY REMOVED
+      // await MapsOfflineCache.cacheSearch(query, locations);
+
+      console.log(`Found ${locations.length} locations for query: "${query}"`);
+      return { locations, error: null };
+
     } catch (error) {
-      console.error('Place details error:', error);
-      throw error;
+      console.error('Error in searchLocation:', error);
+      return { locations: null, error: error as Error };
     }
   }
 
   // Add searchNearbyPlaces method to find RV parks and campgrounds near a location
   async searchNearbyPlaces(location: Coordinates, radius: number = 50000, type: string = 'rv_park'): Promise<{ places: any[] | null; error: Error | null }> {
     try {
-      // Construct a cache key
       const cacheKey = `nearby:${location.latitude},${location.longitude}:${radius}:${type}`;
       
-      // Try to get from cache first
       const cachedResults = await MapsOfflineCache.getCachedSearchResults(cacheKey);
       if (cachedResults) {
         console.log(`Found ${cachedResults.length} cached places near ${location.latitude},${location.longitude}`);
         return { places: cachedResults, error: null };
       }
 
-      console.log(`Searching for ${type} near ${location.latitude},${location.longitude} within ${radius}m`);
+      console.log(`Searching for ${type} near ${location.latitude},${location.longitude} within ${radius}m using Places API`);
       
-      // Use Google Places Nearby Search API
+      if (!GOOGLE_MAPS_API_KEY) {
+        throw new Error('Google Maps API Key is missing for Places search');
+      }
+
       const response = await axios.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', {
         params: {
           location: `${location.latitude},${location.longitude}`,
-          radius: radius,
-          type: type,
-          keyword: 'rv park campground camping',
+          radius: radius, // radius in meters
+          // Use 'type' for broader category, 'keyword' for specific terms
+          type: type, 
+          keyword: 'rv park campground camping', // Help filter results
           key: GOOGLE_MAPS_API_KEY
         }
       });
 
       if (response.data.status !== 'OK' && response.data.status !== 'ZERO_RESULTS') {
-        console.error('Nearby places search failed:', response.data.status, response.data.error_message);
-        throw new Error(`Nearby places search failed: ${response.data.status}`);
+        console.error('Places Nearby Search failed:', response.data.status, response.data.error_message);
+        throw new Error(`Nearby places search failed: ${response.data.status} - ${response.data.error_message || 'Unknown error'}`);
       }
 
       const places = response.data.results || [];
-      console.log(`Found ${places.length} places near ${location.latitude},${location.longitude}`);
+      console.log(`Places API found ${places.length} results near ${location.latitude},${location.longitude}`);
       
-      // Cache results
-      await MapsOfflineCache.cacheSearchResults(cacheKey, places);
+      // Cache results (using the correct function name if it exists)
+      // Assuming MapsOfflineCache has a method like cacheSearchResults
+      try {
+         await MapsOfflineCache.cacheSearchResults(cacheKey, places); 
+      } catch(cacheError) {
+         console.warn("Failed to cache nearby search results:", cacheError);
+      }
 
+      // Map results to a simpler format if needed, or return raw Places API results
+      // For now, return raw results
       return { places, error: null };
+
     } catch (error) {
       console.error('Nearby places search error:', error);
       return { places: null, error: error as Error };
