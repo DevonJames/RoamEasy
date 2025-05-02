@@ -51,7 +51,6 @@ type SignInScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList>;
 type RootNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const SignInScreen = React.memo(() => {
-  console.log('Rendering SignInScreen');
   
   try {
     // Use ref to track if component is mounted

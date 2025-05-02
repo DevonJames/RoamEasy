@@ -9,13 +9,24 @@ import {
   SafeAreaView,
   Share,
   ActivityIndicator,
-  Alert
+  Alert,
+  Dimensions
 } from 'react-native';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import useTrips, { Trip, TripStop } from '../hooks/useTrips';
+import useTrips, { Trip, TripStop as BaseTripStop } from '../hooks/useTrips';
 import CalendarService from '../services/CalendarService';
 import { format } from 'date-fns';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+
+// Define the extended TripStop interface with location property
+interface TripStop extends BaseTripStop {
+  location?: {
+    latitude: number;
+    longitude: number;
+    address: string;
+  };
+}
 
 // Define the navigation types
 type RootStackParamList = {
@@ -39,6 +50,14 @@ const ItineraryScreen = () => {
   
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
+
+  // Add state for map region
+  const [mapRegion, setMapRegion] = useState({
+    latitude: 37.78825,
+    longitude: -122.4324,
+    latitudeDelta: 0.0922,
+    longitudeDelta: 0.0421,
+  });
 
   useEffect(() => {
     // Load the trip details when component mounts
@@ -74,6 +93,59 @@ const ItineraryScreen = () => {
       });
     }
   }, [tripId]);
+
+  // Add a function to calculate the map region based on stops
+  useEffect(() => {
+    if (currentTrip?.stops && currentTrip.stops.length > 0) {
+      // Calculate bounds of all stop locations
+      let minLat = Infinity, maxLat = -Infinity;
+      let minLng = Infinity, maxLng = -Infinity;
+      
+      // Iterate through stops to find bounds
+      currentTrip.stops.forEach((stop: TripStop) => {
+        // Try to extract coordinates from location property or notes
+        let lat, lng;
+        
+        if (stop.location) {
+          lat = stop.location.latitude;
+          lng = stop.location.longitude;
+        } else if (stop.notes) {
+          // Try to extract coordinates from notes using regex
+          const coordinateMatch = stop.notes.match(/\(([-\d.]+),\s*([-\d.]+)\)/);
+          if (coordinateMatch && coordinateMatch.length >= 3) {
+            lat = parseFloat(coordinateMatch[1]);
+            lng = parseFloat(coordinateMatch[2]);
+          }
+        }
+        
+        // Update bounds if we found coordinates
+        if (lat && lng) {
+          minLat = Math.min(minLat, lat);
+          maxLat = Math.max(maxLat, lat);
+          minLng = Math.min(minLng, lng);
+          maxLng = Math.max(maxLng, lng);
+        }
+      });
+      
+      // If we found valid bounds
+      if (minLat !== Infinity && maxLat !== -Infinity) {
+        // Calculate center point
+        const centerLat = (minLat + maxLat) / 2;
+        const centerLng = (minLng + maxLng) / 2;
+        
+        // Calculate span with padding
+        const latDelta = (maxLat - minLat) * 1.4;
+        const lngDelta = (maxLng - minLng) * 1.4;
+        
+        setMapRegion({
+          latitude: centerLat,
+          longitude: centerLng,
+          latitudeDelta: Math.max(latDelta, 0.01),
+          longitudeDelta: Math.max(lngDelta, 0.01),
+        });
+      }
+    }
+  }, [currentTrip?.stops]);
 
   // Handle note editing
   const startEditingNotes = (stopId: string, currentNotes: string = '') => {
@@ -209,6 +281,70 @@ const ItineraryScreen = () => {
       </View>
     </View>
   );
+
+  // Add a map view rendering function
+  const renderMap = () => {
+    if (!currentTrip?.stops || currentTrip.stops.length === 0) {
+      return null;
+    }
+    
+    // Prepare coordinates for the polyline
+    const coordinates = currentTrip.stops
+      .sort((a, b) => a.stop_order - b.stop_order)
+      .map((stop: TripStop) => {
+        // Try to extract coordinates from location property or notes
+        let latitude, longitude;
+        
+        if (stop.location) {
+          latitude = stop.location.latitude;
+          longitude = stop.location.longitude;
+        } else if (stop.notes) {
+          // Try to extract coordinates from notes
+          const coordinateMatch = stop.notes.match(/\(([-\d.]+),\s*([-\d.]+)\)/);
+          if (coordinateMatch && coordinateMatch.length >= 3) {
+            latitude = parseFloat(coordinateMatch[1]);
+            longitude = parseFloat(coordinateMatch[2]);
+          }
+        }
+        
+        if (latitude && longitude) {
+          return { latitude, longitude };
+        }
+        return null;
+      })
+      .filter(coord => coord !== null);
+    
+    if (coordinates.length < 2) {
+      return null; // Need at least 2 points for a route line
+    }
+    
+    return (
+      <View style={styles.mapContainer}>
+        <MapView
+          style={styles.map}
+          region={mapRegion}
+          provider={PROVIDER_GOOGLE}
+        >
+          {coordinates.map((coord, index) => (
+            coord && (
+              <Marker
+                key={`marker-${index}`}
+                coordinate={coord}
+                title={`Stop ${index + 1}`}
+                pinColor={index === 0 ? 'green' : index === coordinates.length - 1 ? 'red' : 'blue'}
+              />
+            )
+          ))}
+          
+          <Polyline
+            coordinates={coordinates.filter(Boolean)}
+            strokeColor="#2E7D32" // Forest Green from your color palette
+            strokeWidth={3}
+          />
+        </MapView>
+      </View>
+    );
+  };
 
   // Render a stop item
   const renderStopItem = ({ item, index }: { item: TripStop; index: number }) => {
@@ -381,20 +517,27 @@ const ItineraryScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       {renderHeader()}
-      <FlatList
-        data={displayStops.sort((a, b) => {
-          // Check for either property name
-          if ('stopOrder' in a && 'stopOrder' in b) {
-            return (a as any).stopOrder - (b as any).stopOrder;
-          } else if ('stop_order' in a && 'stop_order' in b) {
-            return (a as any).stop_order - (b as any).stop_order;
-          }
-          return 0;
-        })}
-        keyExtractor={item => item.id}
-        renderItem={renderStopItem}
-        contentContainerStyle={styles.listContent}
-      />
+      
+      {/* Add the map view here */}
+      {renderMap()}
+      
+      {isLoading ? (
+        <ActivityIndicator size="large" color="#2E7D32" style={styles.loader} />
+      ) : error ? (
+        <Text style={styles.errorText}>{error}</Text>
+      ) : !currentTrip ? (
+        <Text style={styles.errorText}>Trip not found</Text>
+      ) : !currentTrip.stops || currentTrip.stops.length === 0 ? (
+        <Text style={styles.noStopsText}>No stops in this trip yet. Add some in the route planner.</Text>
+      ) : (
+        <FlatList
+          data={currentTrip.stops.sort((a, b) => a.stop_order - b.stop_order)}
+          renderItem={renderStopItem}
+          keyExtractor={(item) => item.id}
+          style={styles.stopsList}
+          contentContainerStyle={styles.stopsListContent}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -615,6 +758,32 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     marginBottom: 16,
+  },
+  mapContainer: {
+    width: '100%',
+    height: 200,
+    marginBottom: 10,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  loader: {
+    marginTop: 16,
+  },
+  noStopsText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  stopsList: {
+    padding: 16,
+  },
+  stopsListContent: {
+    padding: 16,
   },
 });
 

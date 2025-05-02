@@ -12,7 +12,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   FlatList,
-  Dimensions
+  Dimensions,
+  ImageBackground
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { useNavigation } from '@react-navigation/native';
@@ -54,11 +55,11 @@ const COLORS = {
 
 // Define scenery preference options
 const sceneryOptions = [
-  { id: 'coast', label: 'Coastal Views', icon: 'water-outline' as const },
-  { id: 'mountains', label: 'Mountain Passes', icon: 'triangle-outline' as const },
-  { id: 'forest', label: 'Forested Areas', icon: 'leaf-outline' as const },
-  { id: 'rivers', label: 'Rivers & Lakes', icon: 'boat-outline' as const },
-  { id: 'desert', label: 'Desert Landscapes', icon: 'sunny-outline' as const },
+  { id: 'coast', label: 'Coastal Views', icon: 'water-outline' as const, image: require('../assets/images/coastal.jpg') },
+  { id: 'mountains', label: 'Mountain Passes', icon: 'triangle-outline' as const, image: require('../assets/images/mountains.jpg') },
+  { id: 'forest', label: 'Forested Areas', icon: 'leaf-outline' as const, image: require('../assets/images/forest.jpg') },
+  { id: 'rivers', label: 'Rivers & Lakes', icon: 'boat-outline' as const, image: require('../assets/images/rivers.jpg') },
+  { id: 'desert', label: 'Desert Landscapes', icon: 'sunny-outline' as const, image: require('../assets/images/desert.jpg') },
 ];
 
 // Define route stop interface
@@ -159,6 +160,9 @@ const RoutePlannerScreen = () => {
   const [tripStartDate, setTripStartDate] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
   const [nightsPerStop, setNightsPerStop] = useState<number[]>([1, 1, 1, 1, 1]); // Default 1 night per stop
+
+  // Add state for tooltip visibility
+  const [showTooltip, setShowTooltip] = useState<boolean>(false);
 
   const isLoadingCombined = prefsLoading || mapsLoading || tripLoading || isLoading;
   const [activeSearchField, setActiveSearchField] = useState<'start' | 'end' | null>(null);
@@ -776,7 +780,7 @@ const RoutePlannerScreen = () => {
   );
 
   // Render scenery option
-  const renderSceneryOption = (item: { id: string, label: string, icon: keyof typeof Ionicons.glyphMap }) => {
+  const renderSceneryOption = (item: { id: string, label: string, icon: keyof typeof Ionicons.glyphMap, image: any }) => {
     const isSelected = selectedScenery.includes(item.id);
     
     return (
@@ -789,15 +793,23 @@ const RoutePlannerScreen = () => {
         accessibilityRole="checkbox"
         accessibilityState={{ checked: isSelected }}
       >
-        <Ionicons 
-          name={item.icon} 
-          size={24} 
-          color={isSelected ? 'white' : COLORS.primary} 
-          style={styles.sceneryIcon} 
-        />
-        <Text style={[styles.sceneryLabel, isSelected && styles.sceneryLabelSelected]}>
-          {item.label}
-        </Text>
+        <ImageBackground 
+          source={item.image} 
+          style={styles.sceneryBackground}
+          imageStyle={{ borderRadius: 8, opacity: 0.85 }}
+        >
+          <View style={[styles.sceneryContent, isSelected && styles.sceneryContentSelected]}>
+            <Ionicons 
+              name={item.icon} 
+              size={28} 
+              color={isSelected ? 'white' : COLORS.primary} 
+              style={styles.sceneryIcon} 
+            />
+            <Text style={[styles.sceneryLabel, isSelected && styles.sceneryLabelSelected]}>
+              {item.label}
+            </Text>
+          </View>
+        </ImageBackground>
       </TouchableOpacity>
     );
   };
@@ -873,13 +885,16 @@ const RoutePlannerScreen = () => {
       </View>
       
       {showDatePicker && (
-        <DateTimePicker
-          value={tripStartDate}
-          mode="date"
-          display="default"
-          onChange={handleDateChange}
-          minimumDate={new Date()} // Can't select dates in the past
-        />
+        <View style={styles.datePickerContainer}>
+          <DateTimePicker
+            value={tripStartDate}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'inline' : 'default'}
+            onChange={handleDateChange}
+            minimumDate={new Date()} // Can't select dates in the past
+            style={styles.datePicker}
+          />
+        </View>
       )}
 
       <View style={styles.inputGroup}>
@@ -1129,20 +1144,41 @@ const RoutePlannerScreen = () => {
                   <Text style={styles.sectionTitle}>
                     What kind of scenery do you prefer?
                   </Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Select all that apply. We'll prioritize routes with these features.
-                  </Text>
+                  <View style={styles.subtitleContainer}>
+                    <Text style={styles.sectionSubtitle}>
+                      Select all that apply. We'll prioritize routes with these features.{' '}
+                      <TouchableOpacity 
+                        onPress={() => setShowTooltip(!showTooltip)}
+                        style={styles.inlineInfoButton}
+                        accessible={true}
+                        accessibilityLabel="More information about scenery selection"
+                        accessibilityHint="Displays additional information about how scenery preferences work"
+                      >
+                        <Text style={styles.infoButtonText}>More Info</Text>
+                        <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} />
+                      </TouchableOpacity>
+                    </Text>
+                  </View>
+
+                  {showTooltip && (
+                    <View style={styles.tooltipContainer}>
+                      <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} />
+                      <Text style={styles.infoText}>
+                        Your selections will help us plan the most scenic route possible.
+                        The more options you select, the more flexible we can be with the route.
+                      </Text>
+                      <TouchableOpacity 
+                        onPress={() => setShowTooltip(false)}
+                        style={styles.closeTooltipButton}
+                        hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                      >
+                        <Ionicons name="close" size={16} color="#666" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
 
                   <View style={styles.sceneryContainer}>
                     {sceneryOptions.map(renderSceneryOption)}
-                  </View>
-
-                  <View style={styles.infoContainer}>
-                    <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} />
-                    <Text style={styles.infoText}>
-                      Your selections will help us plan the most scenic route possible.
-                      The more options you select, the more flexible we can be with the route.
-                    </Text>
                   </View>
                 </View>
               )}
@@ -1314,36 +1350,49 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     fontSize: 14,
     color: COLORS.placeholder,
-    marginBottom: 24,
+    lineHeight: 20,
   },
   sceneryContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 24,
+    width: '100%',
+    marginBottom: 0,
   },
   sceneryOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: (width - 60) / 2,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 12,
-    marginBottom: 16,
+    width: '100%',
+    marginBottom: 8,
+    borderRadius: 2,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+    height: 80,
   },
   sceneryOptionSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    borderColor: COLORS.secondary,
+    borderWidth: 2,
+  },
+  sceneryBackground: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+  },
+  sceneryContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    padding: 15,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    width: '100%',
+    height: '100%',
+  },
+  sceneryContentSelected: {
+    backgroundColor: 'rgba(46, 125, 50, 0.85)', // Semi-transparent primary color
   },
   sceneryIcon: {
-    marginRight: 8,
+    marginRight: 12,
   },
   sceneryLabel: {
-    fontSize: 14,
-    color: COLORS.text,
+    fontSize: 18,
     fontWeight: '500',
+    color: COLORS.text,
   },
   sceneryLabelSelected: {
     color: 'white',
@@ -1396,20 +1445,28 @@ const styles = StyleSheet.create({
   inputContainer: {
     marginBottom: 20,
   },
+  datePickerContainer: {
+    marginBottom: 20,
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  datePicker: {
+    width: '100%',
+  },
   datePickerButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    height: 50,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: '#ddd',
+    backgroundColor: 'white',
     borderRadius: 8,
-    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   dateText: {
     fontSize: 16,
-    color: '#333',
+    color: COLORS.text,
   },
   stopCard: {
     backgroundColor: 'white',
@@ -1551,6 +1608,40 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 20,
     borderRadius: 8,
+  },
+  subtitleContainer: {
+    marginBottom: 16,
+  },
+  inlineInfoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    paddingVertical: 0,
+    paddingHorizontal: 4,
+  },
+  tooltipContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#E3F2FD',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    position: 'relative',
+  },
+  closeTooltipButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  infoButtonText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    marginRight: 4,
+    fontWeight: '500',
   },
 });
 

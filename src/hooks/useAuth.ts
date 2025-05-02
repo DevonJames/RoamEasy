@@ -119,18 +119,18 @@ const useAuth = () => {
         // return;
 
         // Restore original logic: Check AsyncStorage and Supabase session
-        console.log("Restoring authentication state...");
+        // console.log("Restoring authentication state...");
         const guestMode = await AsyncStorage.getItem('guest_mode');
         
         if (guestMode === 'true') {
-          console.log("Found guest mode flag in storage.");
+          // console.log("Found guest mode flag in storage.");
           setState(prev => ({ ...prev, isGuest: true, isAuthenticated: false, user: null, isLoading: false }));
         } else {
           console.log("No guest mode flag found, checking Supabase session.");
           const { data, error } = await SupabaseService.getCurrentUser();
           
           if (error) {
-            console.error("Error getting current user:", error);
+            // console.error("Error getting current user:", error);
             setState(prev => ({ ...prev, isAuthenticated: false, user: null, isLoading: false, error }));
           } else if (data?.user) {
             console.log("Found active Supabase session for user:", data.user.id);
