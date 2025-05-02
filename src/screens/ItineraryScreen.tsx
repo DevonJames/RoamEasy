@@ -10,7 +10,8 @@ import {
   Share,
   ActivityIndicator,
   Alert,
-  Dimensions
+  Dimensions,
+  Platform
 } from 'react-native';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,6 +19,7 @@ import useTrips, { Trip, TripStop as BaseTripStop } from '../hooks/useTrips';
 import CalendarService from '../services/CalendarService';
 import { format } from 'date-fns';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapsService, { Coordinates } from '../services/MapsService';
 
 // Define the extended TripStop interface with location property
 interface TripStop extends BaseTripStop {
@@ -58,6 +60,13 @@ const ItineraryScreen = () => {
     latitudeDelta: 0.0922,
     longitudeDelta: 0.0421,
   });
+
+  // Add a state to track map errors
+  const [mapError, setMapError] = useState<boolean>(false);
+
+  // Add state for route data and directions
+  const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
+  const [isLoadingRoute, setIsLoadingRoute] = useState<boolean>(false);
 
   useEffect(() => {
     // Load the trip details when component mounts
@@ -145,6 +154,113 @@ const ItineraryScreen = () => {
         });
       }
     }
+  }, [currentTrip?.stops]);
+
+  // Add useEffect to load route data
+  useEffect(() => {
+    const fetchRouteData = async () => {
+      if (!currentTrip?.stops || currentTrip.stops.length < 2) {
+        return;
+      }
+
+      try {
+        setIsLoadingRoute(true);
+        console.log('Fetching route data for trip with stops:', currentTrip.stops.length);
+        
+        // Sort stops by order
+        const sortedStops = [...currentTrip.stops].sort((a, b) => a.stop_order - b.stop_order);
+        
+        // Get coordinates for each stop
+        const stopCoordinates = sortedStops.map((stop: TripStop) => {
+          if (stop.location) {
+            return {
+              latitude: stop.location.latitude,
+              longitude: stop.location.longitude,
+            };
+          } else if (stop.notes) {
+            // Try to extract coordinates from notes using regex
+            const coordinateMatch = stop.notes.match(/\(([-\d.]+),\s*([-\d.]+)\)/);
+            if (coordinateMatch && coordinateMatch.length >= 3) {
+              return {
+                latitude: parseFloat(coordinateMatch[1]),
+                longitude: parseFloat(coordinateMatch[2])
+              };
+            }
+          }
+          return null;
+        }).filter(coord => coord !== null);
+        
+        console.log('Valid stop coordinates:', stopCoordinates.length);
+        
+        if (stopCoordinates.length >= 2) {
+          // Get route data for each pair of consecutive stops
+          const allRoutePoints: Coordinates[] = [];
+          
+          for (let i = 0; i < stopCoordinates.length - 1; i++) {
+            console.log(`Getting route from stop ${i} to ${i+1}`);
+            
+            const origin = {
+              coordinates: stopCoordinates[i],
+              address: sortedStops[i].notes || ''
+            };
+            
+            const destination = {
+              coordinates: stopCoordinates[i + 1],
+              address: sortedStops[i + 1].notes || ''
+            };
+            
+            // Get route using MapsService
+            const { route, error } = await MapsService.getRoute(origin, destination);
+            
+            if (route && !error) {
+              console.log(`Route found for segment ${i} to ${i+1}:`, route.totalDistance, 'meters');
+              
+              // The route object should contain decoded coordinates
+              if (route.legs && route.legs.length > 0) {
+                // Extract coordinates from route steps
+                route.legs.forEach(leg => {
+                  if (leg.steps && leg.steps.length > 0) {
+                    leg.steps.forEach(step => {
+                      allRoutePoints.push(step.startLocation);
+                    });
+                    // Add the end location of the last step
+                    if (leg.steps.length > 0) {
+                      allRoutePoints.push(leg.steps[leg.steps.length - 1].endLocation);
+                    }
+                  }
+                });
+              } else if (route.waypoints && route.waypoints.length > 0) {
+                // Use waypoints directly if available
+                route.waypoints.forEach(waypoint => {
+                  if (waypoint.coordinates) {
+                    allRoutePoints.push(waypoint.coordinates);
+                  }
+                });
+              }
+            } else {
+              console.error('Failed to get route:', error);
+            }
+          }
+          
+          console.log('Total route points:', allRoutePoints.length);
+          
+          // Set route coordinates for display
+          if (allRoutePoints.length > 0) {
+            setRouteCoordinates(allRoutePoints);
+          } else {
+            // Fallback to direct lines if no route data
+            console.log('No route data found, using direct lines');
+            setRouteCoordinates(stopCoordinates);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch route data:', error);
+      } finally {
+        setIsLoadingRoute(false);
+      }
+    };
+    
+    fetchRouteData();
   }, [currentTrip?.stops]);
 
   // Handle note editing
@@ -282,68 +398,77 @@ const ItineraryScreen = () => {
     </View>
   );
 
-  // Add a map view rendering function
+  // Update the renderMap function to use the route data
   const renderMap = () => {
-    if (!currentTrip?.stops || currentTrip.stops.length === 0) {
+    if (mapError || !currentTrip?.stops || currentTrip.stops.length === 0) {
       return null;
     }
     
-    // Prepare coordinates for the polyline
-    const coordinates = currentTrip.stops
-      .sort((a, b) => a.stop_order - b.stop_order)
-      .map((stop: TripStop) => {
-        // Try to extract coordinates from location property or notes
-        let latitude, longitude;
-        
-        if (stop.location) {
-          latitude = stop.location.latitude;
-          longitude = stop.location.longitude;
-        } else if (stop.notes) {
-          // Try to extract coordinates from notes
-          const coordinateMatch = stop.notes.match(/\(([-\d.]+),\s*([-\d.]+)\)/);
-          if (coordinateMatch && coordinateMatch.length >= 3) {
-            latitude = parseFloat(coordinateMatch[1]);
-            longitude = parseFloat(coordinateMatch[2]);
-          }
-        }
-        
-        if (latitude && longitude) {
-          return { latitude, longitude };
-        }
-        return null;
-      })
-      .filter(coord => coord !== null);
-    
-    if (coordinates.length < 2) {
-      return null; // Need at least 2 points for a route line
-    }
-    
-    return (
-      <View style={styles.mapContainer}>
-        <MapView
-          style={styles.map}
-          region={mapRegion}
-          provider={PROVIDER_GOOGLE}
-        >
-          {coordinates.map((coord, index) => (
-            coord && (
-              <Marker
-                key={`marker-${index}`}
-                coordinate={coord}
-                title={`Stop ${index + 1}`}
-                pinColor={index === 0 ? 'green' : index === coordinates.length - 1 ? 'red' : 'blue'}
-              />
-            )
-          ))}
+    try {
+      // Prepare coordinates for each stop
+      const coordinates = currentTrip.stops
+        .sort((a, b) => a.stop_order - b.stop_order)
+        .map((stop: TripStop) => {
+          // Try to extract coordinates from location property or notes
+          let latitude, longitude;
           
-          <Polyline
-            coordinates={coordinates.filter(Boolean)}
-            strokeColor="#2E7D32" // Forest Green from your color palette
-            strokeWidth={3}
-          />
-        </MapView>
-      </View>
-    );
+          if (stop.location) {
+            latitude = stop.location.latitude;
+            longitude = stop.location.longitude;
+          } else if (stop.notes) {
+            // Try to extract coordinates from notes
+            const coordinateMatch = stop.notes.match(/\(([-\d.]+),\s*([-\d.]+)\)/);
+            if (coordinateMatch && coordinateMatch.length >= 3) {
+              latitude = parseFloat(coordinateMatch[1]);
+              longitude = parseFloat(coordinateMatch[2]);
+            }
+          }
+          
+          if (latitude && longitude) {
+            return { latitude, longitude };
+          }
+          return null;
+        })
+        .filter(coord => coord !== null);
+      
+      if (coordinates.length < 2) {
+        return null; // Need at least 2 points for a route line
+      }
+      
+      return (
+        <View style={styles.mapContainer}>
+          {isLoadingRoute && (
+            <View style={styles.mapLoadingOverlay}>
+              <ActivityIndicator size="large" color="#2E7D32" />
+            </View>
+          )}
+          <MapView
+            style={styles.map}
+            region={mapRegion}
+            provider={Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE}
+          >
+            {/* Display route line using fetched coordinate data if available */}
+            {routeCoordinates.length > 0 ? (
+              <Polyline
+                coordinates={routeCoordinates}
+                strokeColor="#2E7D32" // Forest Green from your color palette
+                strokeWidth={3}
+              />
+            ) : (
+              <Polyline
+                coordinates={coordinates.filter(Boolean)}
+                strokeColor="#2E7D32" // Forest Green from your color palette
+                strokeWidth={3}
+              />
+            )}
+          </MapView>
+        </View>
+      );
+    } catch (err) {
+      console.error('Error rendering map:', err);
+      setMapError(true);
+      return null;
+    }
   };
 
   // Render a stop item
@@ -784,6 +909,16 @@ const styles = StyleSheet.create({
   },
   stopsListContent: {
     padding: 16,
+  },
+  mapLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 
