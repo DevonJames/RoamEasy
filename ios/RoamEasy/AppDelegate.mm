@@ -1,12 +1,17 @@
 #import "AppDelegate.h"
+// #import "GeneratedDotEnv.h" // Removed import
 
 #import <React/RCTBundleURLProvider.h>
 #import <React/RCTLinkingManager.h>
+#import <GoogleMaps/GoogleMaps.h>
 
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
+  // Revert to temporary hardcoded key
+  [GMSServices provideAPIKey:@"AIzaSyAIDXI1p7Z41i1dgQxFHvMFeYO4b61uef0"];
+
   self.moduleName = @"main";
 
   // You can add your custom initial props in the dictionary below.

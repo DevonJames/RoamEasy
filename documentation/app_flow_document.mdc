@@ -3,7 +3,6 @@ description: Apply these rules when making changes to the project
 globs:
 alwaysApply: true
 ---
-
 Update this rule if user requested changes to the project requirement, etc.
 # RoamEasy App Flow Document
 
@@ -21,15 +20,15 @@ Once signed in, the user lands on the Home page, which shows a friendly greeting
 
 ### Creating a New Trip and Route Planning
 
-The user begins by tapping the Create New Trip button. They see a blank form where they enter a name for their trip and choose their start and end points on an interactive map. Large tap areas let the user search for cities or pan the map to place start and end markers. Below the map, a slider lets the user set their maximum daily driving time. A next button takes them to scenery preferences, where they indicate whether they want coast views, mountain passes, riverbanks, or forested paths. Once all preferences are set, the user taps “Plan Route” and the app calculates a multi-stop route, drawing colored legs on the map and placing big icons at each overnight stop.
+The user begins by tapping the Create New Trip button. They see a blank form where they enter a name for their trip and choose their start and end points on an interactive map. Large tap areas let the user search for cities or pan the map to place start and end markers. Below the map, a slider lets the user set their maximum daily driving time. A next button takes them to scenery preferences, where they indicate whether they want coast views, mountain passes, riverbanks, or forested paths. Once all preferences are set, the user taps “Plan Route” and the app calculates a multi-stop route, drawing the full route path and placing big icons at each overnight stop on the map.
 
 ### Reviewing Stop-by-Stop Resort Suggestions
 
-After the route appears, each stop icon becomes tappable. Tapping a stop opens a full-screen overlay showing three to five resort cards that match the user’s RV length, hookup needs, cost limits, and scenery choices. Each card features a resort photo, nightly rate, user rating, phone number for direct contact, and the distance from the previous stop. Swiping left or right lets the user browse options, and tapping “View Details” opens the resort’s booking instructions and suggested site numbers. A back arrow returns the user to the map view with their current selections highlighted.
+After the route appears, each stop icon becomes tappable. Tapping a stop opens a full-screen overlay showing three to five resort cards that match the user’s RV length, hookup needs, cost limits, and scenery choices. Each card features a resort photo, nightly rate, user rating, phone number for direct contact, and the distance from the previous stop. Swiping left or right lets the user browse options, and tapping “View Details” opens the resort’s booking instructions and suggested site numbers. A back arrow returns the user to the map view (showing the route path and selected stops) with their current selections highlighted.
 
 ### Itinerary Review and Customization
 
-When the user has selected resorts for all stops, a Review screen lists each day’s destination in order. The user can drag and drop days to change the order or tap a resort to swap it for another option. Under each night, an expandable notes field appears. Tapping it opens a text box where the user can type anything from party details to packing reminders. As text grows, the field expands to fit the content. Once the itinerary looks right, the user taps “Save & Exit.”
+When the user has selected resorts for all stops, a Review screen lists each day’s destination in order alongside a map showing the complete visualized route. The user can drag and drop days to change the order or tap a resort to swap it for another option. Under each night, an expandable notes field appears. Tapping it opens a text box where the user can type anything from party details to packing reminders. As text grows, the field expands to fit the content. Once the itinerary looks right, the user taps “Save & Exit.”
 
 ### Manual Booking Support
 

@@ -3,7 +3,6 @@ description: Apply these rules when making changes to the project
 globs:
 alwaysApply: true
 ---
-
 Update this rule if user requested changes to the project requirement, etc.
 # Implementation plan
 
@@ -22,7 +21,7 @@ Update this rule if user requested changes to the project requirement, etc.
 `// macOS { "mcpServers": { "supabase": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-postgres", "<connection-string>"] } }} // Windows { "mcpServers": { "supabase": { "command": "cmd", "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-postgres", "<connection-string>"] } }} `(Tech Stack Document: Backend)
 
 1.  **Obtain Supabase connection string**: Visit <https://supabase.com/docs/guides/getting-started/mcp#connect-to-supabase-using-mcp> and paste your `<connection-string>` into the JSON above. (Tech Stack Document: Backend)
-2.  **Verify MCP connection**: In Cursor’s Settings → MCP you should see a green “active” status next to “supabase.” (Development Tools: Cursor)
+2.  **Verify MCP connection**: In Cursor's Settings → MCP you should see a green "active" status next to "supabase." (Development Tools: Cursor)
 
 ## Phase 2: Frontend Development
 
@@ -41,7 +40,7 @@ Update this rule if user requested changes to the project requirement, etc.
 
 1.  **Validation**: Run `npx pod-install ios` and then `yarn react-native run-ios` to confirm the app boots. (Tech Stack Document: Mobile)
 2.  **Setup navigation container**: Create `/src/navigation/AppNavigator.tsx` with React Navigation boilerplate. (Application Flow)
-3.  **Home Screen skeleton**: Create `/src/screens/HomeScreen.tsx` with placeholder header “RoamEasy” and bottom tab navigation. (Application Flow)
+3.  **Home Screen skeleton**: Create `/src/screens/HomeScreen.tsx` with placeholder header "RoamEasy" and bottom tab navigation. (Application Flow)
 4.  **Route Planner UI**: Create `/src/screens/RoutePlannerScreen.tsx` with inputs for start/end location, max driving time selector, and scenery preference dropdown. (PRD Section: Smart Route Planner)
 5.  **Itinerary Screen**: Create `/src/screens/ItineraryScreen.tsx` to list saved stops with reorder handles. (PRD Section: Trip Itinerary Management)
 6.  **Resort Details Screen**: Create `/src/screens/ResortDetailsScreen.tsx` showing photo, rates, rating, phone, and booking link button. (PRD Section: Resort Suggestions)
@@ -58,28 +57,38 @@ Update this rule if user requested changes to the project requirement, etc.
 1.  **Initialize Supabase project**: In Supabase Console, create a new project in `us-east-1`; note `project URL` & `anon key`. (Tech Stack Document: Backend)
 2.  **Define Postgres schema**: Create `supabase/schema.sql` with:
 
-`-- users (RLS enabled) create table users (id uuid primary key, email text unique, created_at timestamp default now()); -- trips create table trips (id uuid primary key, user_id uuid references users(id), name text, created_at timestamp default now()); -- stops create table stops (id uuid primary key, trip_id uuid references trips(id), order smallint, lat numeric, lng numeric, notes text); -- resorts create table resorts (id uuid primary key, stop_id uuid references stops(id), name text, rating numeric, cost_per_night numeric, amenities jsonb, site_number text); `(Tech Stack Document: Backend)
+    `-- users (RLS enabled)
+    create table users (id uuid primary key, email text unique, created_at timestamp default now());
+    -- trips
+    create table trips (id uuid primary key, user_id uuid references users(id), name text, route_polyline text, created_at timestamp default now());
+    -- stops
+    create table stops (id uuid primary key, trip_id uuid references trips(id), order smallint, lat numeric, lng numeric, notes text);
+    -- resorts
+    create table resorts (id uuid primary key, stop_id uuid references stops(id), name text, rating numeric, cost_per_night numeric, amenities jsonb, site_number text);
+    ` (Tech Stack Document: Backend)
 
-1.  **Create tables via MCP**: Run:
+3.  **Create tables via MCP**: Run:
 
-`npx @modelcontextprotocol/server-postgres "<connection-string>" < supabase/schema.sql `(Tech Stack Document: Backend)
+    `npx @modelcontextprotocol/server-postgres "<connection-string>" < supabase/schema.sql` (Tech Stack Document: Backend)
 
-1.  **Validation**: Run `npx @modelcontextprotocol/server-postgres "<connection-string>" --list-tables` and confirm tables exist. (Tech Stack Document: Backend)
-2.  **Configure Auth providers**: In Supabase Console → Auth → Settings → External OAuth, enable Google and Apple with client IDs. (Q&A: Authentication)
-3.  **Enable RLS**: In Supabase SQL Editor, run `alter table trips enable row level security;` and add a policy `using (auth.uid() = user_id);`. (Tech Stack Document: Security)
-4.  **Install Supabase client**: In frontend, run `yarn add @supabase/supabase-js@2.8.0`. (Tech Stack Document: Backend)
-5.  **Supabase service**: Create `/src/services/SupabaseService.ts` to init `createClient(SUPABASE_URL, SUPABASE_ANON_KEY)` and export auth & db methods. (Tech Stack Document: Backend)
-6.  **Validation**: In `/src/screens/LoginScreen.tsx`, call `supabase.auth.signInWithPassword()` and verify successful login. (Q&A: Authentication)
+4.  **Validation**: Run `npx @modelcontextprotocol/server-postgres "<connection-string>" --list-tables` and confirm tables exist. (Tech Stack Document: Backend)
+5.  **Configure Auth providers**: In Supabase Console → Auth → Settings → External OAuth, enable Google and Apple with client IDs. (Q&A: Authentication)
+6.  **Enable RLS**: In Supabase SQL Editor, run `alter table trips enable row level security;` and add a policy `using (auth.uid() = user_id);`. (Tech Stack Document: Security)
+7.  **Install Supabase client**: In frontend, run `yarn add @supabase/supabase-js@2.8.0`. (Tech Stack Document: Backend)
+8.  **Supabase service**: Create `/src/services/SupabaseService.ts` to init `createClient(SUPABASE_URL, SUPABASE_ANON_KEY)` and export auth & db methods. (Tech Stack Document: Backend)
+9.  **Update Route Planning Logic**: Modify the backend function/endpoint responsible for route planning (e.g., `/resorts/search` edge function) to generate the route polyline using Google Maps/ORS API and store it in the `trips.route_polyline` field.
+10. **Validation**: In `/src/screens/LoginScreen.tsx`, call `supabase.auth.signInWithPassword()` and verify successful login. (Q&A: Authentication)
 
 ## Phase 4: Integration
 
-1.  **Route planning flow**: In `RoutePlannerScreen.tsx`, call `MapsService.getRoute()` then `OpenAIService.refineStops()`; display results in `ItineraryScreen`. (Application Flow)
-2.  **Resort suggestions**: For each stop, call `OpenAIService` to fetch resorts, cache via `OfflineService`, then render in `ResortDetailsScreen.tsx`. (PRD Section: Resort Suggestions)
-3.  **Trip CRUD**: Wire up `SupabaseService` to save/retrieve trips and stops; on save, write to Supabase and Local SQLite. (PRD Section: Trip Itinerary Management)
-4.  **Offline sync**: Detect offline via NetInfo; read/write only to SQLite, then sync to Supabase on reconnect. (PRD Section: Offline Access)
-5.  **Calendar export**: From `ItineraryScreen`, invoke `CalendarService.exportToCalendar()` and handle user consent. (PRD Section: Calendar Export)
-6.  **Sharing feature**: Add `Share` button in `ItineraryScreen` that generates a simplified PDF/HTML itinerary and invokes React Native Share API. (PRD Section: Sharing)
-7.  **Validation**: Simulate offline in emulator and confirm itinerary and maps display correctly; test share and calendar export. (PRD Section: Offline Access)
+1.  **Route planning flow**: In `RoutePlannerScreen.tsx`, call `MapsService.getRoute()` then `OpenAIService.refineStops()`; fetch the resulting trip data including `route_polyline` from Supabase; display results (stops) in `ItineraryScreen` and the polyline on a map component.
+2.  **Display Route Polyline**: In the relevant screen (`ItineraryScreen.tsx` or a dedicated map view component), use `react-native-maps` `<Polyline>` component to draw the fetched `route_polyline` on the map.
+3.  **Resort suggestions**: For each stop, call `OpenAIService` to fetch resorts, cache via `OfflineService`, then render in `ResortDetailsScreen.tsx`.
+4.  **Trip CRUD**: Wire up `SupabaseService` to save/retrieve trips and stops; on save, write to Supabase and Local SQLite (including `route_polyline` if fetched/available).
+5.  **Offline sync**: Detect offline via NetInfo; read/write only to SQLite, then sync to Supabase on reconnect. Ensure `route_polyline` is cached locally as part of trip data.
+6.  **Calendar export**: From `ItineraryScreen`, invoke `CalendarService.exportToCalendar()` and handle user consent.
+7.  **Sharing feature**: Add `Share` button in `ItineraryScreen` that generates a simplified PDF/HTML itinerary and invokes React Native Share API.
+8.  **Validation**: Simulate offline in emulator and confirm itinerary, visualized route, and maps display correctly; test share and calendar export.
 
 ## Phase 5: Deployment
 

@@ -26,6 +26,8 @@ import { debounce } from 'lodash';
 import SupabaseService from '../services/SupabaseService';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../utils/environment';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import polyline from '@mapbox/polyline'; // For decoding polylines
 
 // Define navigation types
 type RootStackParamList = {
@@ -80,6 +82,7 @@ interface RouteResult {
     longitude: number;
   };
   recommendedStops: RouteStop[];
+  routeGeometry?: { latitude: number; longitude: number }[] | string;
 }
 
 // Define location search result interface
@@ -487,10 +490,15 @@ const RoutePlannerScreen = () => {
 
         console.log('Created recommendedStops from planning stops:', JSON.stringify(recommendedStops, null, 2));
         
+        // ---> Log the correct polyline string <---
+        const overviewPolyline = result.route.overviewPolyline; // Get the correct field
+        console.log('Raw overview_polyline from planRoute:', JSON.stringify(overviewPolyline));
+        
         const routeResult: RouteResult = {
           startCoords: result.route.waypoints[0].coordinates,
           endCoords: result.route.waypoints[1].coordinates,
-          recommendedStops
+          recommendedStops,
+          routeGeometry: overviewPolyline // Assign the correct polyline string
         };
         
         setRouteResult(routeResult);
@@ -507,7 +515,8 @@ const RoutePlannerScreen = () => {
           latitude: endLocationObj.coordinates.latitude,
           longitude: endLocationObj.coordinates.longitude
         },
-        recommendedStops: []
+        recommendedStops: [],
+        routeGeometry: undefined
       };
       
       // IMPORTANT: If we have no stops at this point, manually create some
@@ -924,12 +933,83 @@ const RoutePlannerScreen = () => {
       );
     }
     
+    // ---> Decode Polyline if it's a string <--- 
+    let routeCoordinates: { latitude: number; longitude: number }[] = [];
+    if (typeof routeResult.routeGeometry === 'string') {
+      try {
+        routeCoordinates = polyline.decode(routeResult.routeGeometry).map(point => ({ latitude: point[0], longitude: point[1] }));
+      } catch (e) {
+        console.error("Failed to decode polyline:", e);
+        // Fallback or error handling if decode fails
+      }
+    } else if (Array.isArray(routeResult.routeGeometry)) {
+      // Assume it's already an array of coordinates
+      routeCoordinates = routeResult.routeGeometry;
+    }
+    
+    // Calculate initial map region to fit the route
+    let initialRegion = undefined;
+    if (routeCoordinates.length > 0) {
+        // Basic bounding box calculation (can be improved)
+        const latitudes = routeCoordinates.map(p => p.latitude);
+        const longitudes = routeCoordinates.map(p => p.longitude);
+        const minLat = Math.min(...latitudes);
+        const maxLat = Math.max(...latitudes);
+        const minLng = Math.min(...longitudes);
+        const maxLng = Math.max(...longitudes);
+        
+        initialRegion = {
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLng + maxLng) / 2,
+            latitudeDelta: (maxLat - minLat) * 1.4, // Add padding
+            longitudeDelta: (maxLng - minLng) * 1.4, // Add padding
+        };
+    }
+
+    // ---> Log decoded coordinates and calculated region <--- 
+    console.log(`Decoded routeCoordinates length: ${routeCoordinates.length}`);
+    if (initialRegion) {
+      console.log('Calculated initialRegion:', JSON.stringify(initialRegion));
+    } else {
+      console.log('Initial region could not be calculated.');
+    }
+
     return (
       <View style={styles.stepContainer}>
         <Text style={styles.stepTitle}>Review Your Trip</Text>
         <Text style={styles.tripNameDisplay}>{tripName}</Text>
         <Text style={styles.stepDescription}>Review your itinerary and customize nights per stop.</Text>
         
+        {/* ---> Add MapView Here <--- */} 
+        {routeCoordinates.length > 0 && (
+          <MapView
+            style={styles.mapView}
+            provider={PROVIDER_GOOGLE} // Use Google Maps
+            initialRegion={initialRegion}
+            showsUserLocation={false}
+            showsPointsOfInterest={false}
+          >
+            {/* ---> TEMPORARILY COMMENT OUT POLYLINE AND MARKERS <--- */}
+            {/* 
+            <Polyline
+              coordinates={routeCoordinates}
+              strokeColor={COLORS.primary} // Route color
+              strokeWidth={4}
+            />
+            
+            {routeResult.recommendedStops.map((stop, index) => (
+              <Marker
+                key={`stop-marker-${index}`}
+                coordinate={stop.location} // Use the location object directly
+                title={`Stop ${index + 1}`}
+                description={stop.location.address}
+                pinColor={index === 0 ? 'green' : index === routeResult.recommendedStops.length - 1 ? 'red' : 'blue'}
+              />
+            ))}
+            */}
+          </MapView>
+        )}
+
         <FlatList
           data={routeResult.recommendedStops}
           keyExtractor={(item, index) => `stop-${index}`}
@@ -1465,6 +1545,12 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     marginLeft: 8,
+  },
+  mapView: {
+    height: 250, // Adjust height as needed
+    width: '100%',
+    marginBottom: 20,
+    borderRadius: 8,
   },
 });
 

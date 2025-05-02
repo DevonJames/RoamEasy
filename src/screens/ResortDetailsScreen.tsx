@@ -349,16 +349,28 @@ const ResortDetailsScreen = () => {
         )}
         
         <View style={styles.resortInfo}>
-          <Text style={styles.resortName}>{resortName}</Text> 
+          <Text style={styles.resortName}>{item?.name || 'Resort Name Unavailable'}</Text> 
           
           <View style={styles.ratingContainer}>
             <Ionicons name="star" size={18} color={COLORS.primary} />
-            <Text style={styles.rating}>{ratingString}</Text> 
+            {typeof item.rating === 'number' && item.rating > 0 ? (
+              <Text style={styles.rating}>{item.rating.toFixed(1)}</Text>
+            ) : (
+              <Text style={styles.rating}>N/A</Text>
+            )}
           </View>
           
-          <Text style={styles.price}>{priceString}</Text>
+          {typeof item.nightly_rate === 'number' ? (
+             <Text style={styles.price}>${item.nightly_rate}/night</Text>
+          ) : (
+            <Text style={styles.price}>Price not available</Text>
+          )}
           
-          <Text style={styles.amenities}>{amenitiesText}</Text> 
+          {amenitiesText ? (
+             <Text style={styles.amenities}>{amenitiesText}</Text>
+          ) : (
+            <Text style={styles.amenities}>No specific amenities listed</Text>
+          )}
           
           <View style={styles.buttonContainer}>
             <TouchableOpacity 

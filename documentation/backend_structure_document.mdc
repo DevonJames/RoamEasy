@@ -3,7 +3,6 @@ description: Apply these rules when making changes to the project
 globs:
 alwaysApply: true
 ---
-
 Update this rule if user requested changes to the project requirement, etc.
 # Backend Structure Document for RoamEasy
 
@@ -14,7 +13,7 @@ This document outlines the backend architecture, database design, APIs, hosting,
 ### Overall Design
 
 *   **Three-tier structure**: mobile client → API layer (Edge Functions/REST) → managed database
-*   **Serverless approach**: we use Supabase Edge Functions (Deno) for custom logic and Supabase’s auto-generated REST endpoints for standard CRUD
+*   **Serverless approach**: we use Supabase Edge Functions (Deno) for custom logic and Supabase's auto-generated REST endpoints for standard CRUD
 *   **Microservice flavor**: each major feature (route planning, resort suggestions, calendar export) lives in its own function or endpoint
 
 ### Frameworks & Patterns
@@ -29,7 +28,7 @@ This document outlines the backend architecture, database design, APIs, hosting,
 *   **Auto-scaling** of edge functions: handles spikes in activity without manual intervention
 *   **Managed Postgres** with read replicas available for heavy read loads (e.g., frequent resort lookups)
 *   **Separation of concerns**: business logic lives in functions, data storage logic lives in database
-*   **Cold-start minimization**: edge functions are lightweight and kept warm via Supabase’s infrastructure
+*   **Cold-start minimization**: edge functions are lightweight and kept warm via Supabase's infrastructure
 
 ## 2. Database Management
 
@@ -53,18 +52,103 @@ Below is a human-readable overview and accompanying SQL definitions for our main
 ### Tables & Relationships (Human Readable)
 
 *   **users**: core login records (email, social logins), linked 1:1 to user_profiles
-*   **user_profiles**: user’s personal details and role flags (guest vs. registered)
-*   **preferences**: each user’s vehicle, cost, hookup, pet, and scenery preferences in a JSON field
+*   **user_profiles**: user's personal details and role flags (guest vs. registered)
+*   **preferences**: each user's vehicle, cost, hookup, pet, and scenery preferences in a JSON field
 *   **trips**: saved itineraries with name, creation date, and owner
 *   **trip_stops**: individual stops linked to a trip, with order, check-in & out times, user notes
 *   **resorts**: cached resort metadata (name, location, ratings, amenities, contact info)
 *   **calendar_exports**: records of exported events (Google, iCloud, iCal) and their external IDs
 *   **notifications**: scheduled reminders tied to trips or stops, with send status
-*   **subscriptions**: user’s freemium or paid plan details
+*   **subscriptions**: user's freemium or paid plan details
 
 ### SQL Schema (PostgreSQL)
 
-`-- Users and Profiles table users ( id uuid primary key, email text unique not null, created_at timestamp default now() ); table user_profiles ( user_id uuid references users(id), full_name text, is_guest boolean default false, created_at timestamp default now(), primary key(user_id) ); -- Preferences table preferences ( id serial primary key, user_id uuid references users(id), data jsonb not null, updated_at timestamp default now() ); -- Trips and Stops table trips ( id uuid primary key, user_id uuid references users(id), name text, created_at timestamp default now(), updated_at timestamp default now() ); table trip_stops ( id uuid primary key, trip_id uuid references trips(id), resort_id uuid references resorts(id), stop_order int, check_in date, check_out date, notes text ); -- Resorts Cache table resorts ( id uuid primary key, name text, address text, latitude numeric, longitude numeric, rating numeric, amenities jsonb, phone text, website text, last_updated timestamp default now() ); -- Calendar Exports table calendar_exports ( id uuid primary key, trip_id uuid references trips(id), service text, -- 'google','icloud','ical' external_event_ids jsonb, exported_at timestamp default now() ); -- Notifications table notifications ( id uuid primary key, user_id uuid references users(id), trip_id uuid references trips(id), event_time timestamp, notify_at timestamp, type text, sent boolean default false ); -- Subscriptions table subscriptions ( id uuid primary key, user_id uuid references users(id), plan text, status text, started_at timestamp, ends_at timestamp );`
+`-- Users and Profiles
+table users (
+  id uuid primary key,
+  email text unique not null,
+  created_at timestamp default now()
+);
+
+table user_profiles (
+  user_id uuid references users(id),
+  full_name text,
+  is_guest boolean default false,
+  created_at timestamp default now(),
+  primary key(user_id)
+);
+
+-- Preferences
+table preferences (
+  id serial primary key,
+  user_id uuid references users(id),
+  data jsonb not null,
+  updated_at timestamp default now()
+);
+
+-- Trips and Stops
+table trips (
+  id uuid primary key,
+  user_id uuid references users(id),
+  name text,
+  route_polyline text, -- Stores the encoded polyline for the route map visualization
+  created_at timestamp default now(),
+  updated_at timestamp default now()
+);
+
+table trip_stops (
+  id uuid primary key,
+  trip_id uuid references trips(id),
+  resort_id uuid references resorts(id),
+  stop_order int,
+  check_in date,
+  check_out date,
+  notes text
+);
+
+-- Resorts Cache
+table resorts (
+  id uuid primary key,
+  name text,
+  address text,
+  latitude numeric,
+  longitude numeric,
+  rating numeric,
+  amenities jsonb,
+  phone text,
+  website text,
+  last_updated timestamp default now()
+);
+
+-- Calendar Exports
+table calendar_exports (
+  id uuid primary key,
+  trip_id uuid references trips(id),
+  service text, -- 'google','icloud','ical'
+  external_event_ids jsonb,
+  exported_at timestamp default now()
+);
+
+-- Notifications
+table notifications (
+  id uuid primary key,
+  user_id uuid references users(id),
+  trip_id uuid references trips(id),
+  event_time timestamp,
+  notify_at timestamp,
+  type text,
+  sent boolean default false
+);
+
+-- Subscriptions
+table subscriptions (
+  id uuid primary key,
+  user_id uuid references users(id),
+  plan text,
+  status text,
+  started_at timestamp,
+  ends_at timestamp
+);`
 
 ## 4. API Design and Endpoints
 
@@ -84,9 +168,9 @@ All endpoints expect a valid JWT in the `Authorization` header except guest rout
 
 ### Trip Management
 
-*   `GET /trips` → list user’s trips
-*   `POST /trips` → create a new trip
-*   `GET /trips/{tripId}` → fetch trip details
+*   `GET /trips` → list user's trips (includes basic details, not full stops or polyline)
+*   `POST /trips` → create a new trip stub (name, user_id only; route planned separately)
+*   `GET /trips/{tripId}` → fetch full trip details, including stops and `route_polyline`
 *   `PUT /trips/{tripId}` → rename or update basic trip info
 *   `DELETE /trips/{tripId}` → remove a trip
 
@@ -99,7 +183,7 @@ All endpoints expect a valid JWT in the `Authorization` header except guest rout
 
 ### Resort Suggestions & Routing
 
-*   `POST /resorts/search` → payload: start/end, max drive/day, scenery, vehicle size • triggers OpenAI + Google Maps/ORS calls • returns list of candidate stops with resort IDs
+*   `POST /resorts/search` → payload: start/end, max drive/day, scenery, vehicle size • triggers OpenAI + Google Maps/ORS calls • returns list of candidate stops with resort IDs and the `route_polyline` for the generated trip, saving it to the trip record.
 
 ### Calendar Export
 
@@ -120,7 +204,7 @@ All endpoints expect a valid JWT in the `Authorization` header except guest rout
 
 ## 6. Infrastructure Components
 
-*   **Load Balancer & API Gateway**: handled by Supabase’s front door
+*   **Load Balancer & API Gateway**: handled by Supabase's front door
 *   **Caching**: • Postgres read replicas for heavy read traffic (resort lookups) • CDN for any static files (e.g., exported .ics files via Storage)
 *   **Third-party integrations**: • Google Maps / OpenRouteService for routing • OpenAI GPT-4-turbo for preference parsing and resort scoring • ElevenLabs for voiceover support (handled inside edge function or client)
 *   **Storage**: Supabase Storage for any generated files or long-term cache dumps
@@ -150,4 +234,4 @@ The RoamEasy backend uses a serverless, managed approach centered on Supabase to
 *   Global execution via edge functions for low latency and easy scaling
 *   Strong security through JWT auth, RLS policies, and encryption
 
-This setup aligns with RoamEasy’s goals of fast development, reliability for RV travelers, and the flexibility to add more AI-powered features in the future.
+This setup aligns with RoamEasy's goals of fast development, reliability for RV travelers, and the flexibility to add more AI-powered features in the future.
