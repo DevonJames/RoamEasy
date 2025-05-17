@@ -488,7 +488,8 @@ export default function useTrips() {
 
         if (data) {
           // Get the updated trip with the updated stop
-          const { data: updatedTripData, error: tripError } = await SupabaseService.getTripById(tripId);
+          const updatedTripData = await SupabaseService.getTrip(tripId);
+          const tripError = updatedTripData ? null : new Error('Failed to get updated trip data');
 
           if (tripError) {
             throw tripError;
@@ -564,7 +565,8 @@ export default function useTrips() {
         }
 
         // Get the updated trip
-        const { data: updatedTripData, error: tripError } = await SupabaseService.getTripById(tripId);
+        const updatedTripData = await SupabaseService.getTrip(tripId);
+        const tripError = updatedTripData ? null : new Error('Failed to get updated trip data');
 
         if (tripError) {
           throw tripError;

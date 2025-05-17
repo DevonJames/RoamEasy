@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@types/mapbox__polyline": "^1.0.5",
     "@types/react": "~18.3.12",
     "@types/react-native-sqlite-storage": "^6.0.5",
     "react-native-dotenv": "^3.4.11",

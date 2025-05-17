@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -13,7 +13,9 @@ import {
   Platform,
   FlatList,
   Dimensions,
-  ImageBackground
+  ImageBackground,
+  Image,
+  Modal
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { useNavigation } from '@react-navigation/native';
@@ -506,6 +508,16 @@ const RoutePlannerScreen = () => {
         };
         
         setRouteResult(routeResult);
+
+        // Add more detailed logging for route coordinates in the calculateRoute function
+        // Around line 490-500, after receiving the result from planRoute
+        if (result.success && result.route) {
+          console.log('Route waypoints:', JSON.stringify(result.route.waypoints));
+          console.log('Route overview polyline:', result.route.overviewPolyline);
+          console.log('Route total distance:', result.route.totalDistance);
+          console.log('Route total duration:', result.route.totalDuration);
+        }
+
         return { success: true, routeResult };
       }
       
@@ -948,18 +960,37 @@ const RoutePlannerScreen = () => {
       );
     }
     
-    // ---> Decode Polyline if it's a string <--- 
+    // Fix the polyline decoding to correctly map coordinates
     let routeCoordinates: { latitude: number; longitude: number }[] = [];
     if (typeof routeResult.routeGeometry === 'string') {
       try {
-        routeCoordinates = polyline.decode(routeResult.routeGeometry).map(point => ({ latitude: point[0], longitude: point[1] }));
+        // Make sure we're interpreting the decoded points correctly
+        // polyline.decode returns [[lat, lng], [lat, lng], ...] but we need {latitude, longitude} objects
+        const decodedPoints = polyline.decode(routeResult.routeGeometry);
+        console.log(`Decoded ${decodedPoints.length} points from polyline`);
+        
+        routeCoordinates = decodedPoints.map(point => {
+          // Make sure we're using the right array indices
+          // point[0] is latitude, point[1] is longitude
+          return {
+            latitude: point[0], 
+            longitude: point[1]
+          };
+        });
+        
+        // Log the first few coordinates for debugging
+        if (routeCoordinates.length > 0) {
+          console.log('First 3 mapped coordinates:', JSON.stringify(routeCoordinates.slice(0, 3)));
+        }
       } catch (e) {
         console.error("Failed to decode polyline:", e);
-        // Fallback or error handling if decode fails
+        // Fallback to empty array if decode fails
+        routeCoordinates = [];
       }
     } else if (Array.isArray(routeResult.routeGeometry)) {
-      // Assume it's already an array of coordinates
+      // Assume it's already an array of coordinates in the format we need
       routeCoordinates = routeResult.routeGeometry;
+      console.log('Using provided route geometry array, length:', routeCoordinates.length);
     }
     
     // Calculate initial map region to fit the route
@@ -989,40 +1020,74 @@ const RoutePlannerScreen = () => {
       console.log('Initial region could not be calculated.');
     }
 
+    // Add more detailed logging in the renderRouteReviewStep function
+    // Log the first few coordinates to check format
+    if (routeCoordinates.length > 0) {
+      console.log(`First 3 routeCoordinates out of ${routeCoordinates.length}:`, 
+        JSON.stringify(routeCoordinates.slice(0, 3)));
+    } else {
+      console.log('Warning: No route coordinates available to render polyline');
+    }
+
+    // Debug each route coordinate mapping
+    if (typeof routeResult.routeGeometry === 'string') {
+      console.log('Route geometry is a string, length:', routeResult.routeGeometry.length);
+      try {
+        // Log the first few decoded points for debugging
+        const decodedPoints = polyline.decode(routeResult.routeGeometry);
+        console.log(`Decoded ${decodedPoints.length} points from polyline`);
+        if (decodedPoints.length > 0) {
+          console.log('First few decoded points:', decodedPoints.slice(0, 3));
+        }
+      } catch (e) {
+        console.error('Polyline decoding error:', e);
+      }
+    } else if (Array.isArray(routeResult.routeGeometry)) {
+      console.log('Route geometry is already an array of', routeResult.routeGeometry.length, 'coordinates');
+    }
+
     return (
       <View style={styles.stepContainer}>
         <Text style={styles.stepTitle}>Review Your Trip</Text>
         <Text style={styles.tripNameDisplay}>{tripName}</Text>
         <Text style={styles.stepDescription}>Review your itinerary and customize nights per stop.</Text>
         
-        {/* ---> Add MapView Here <--- */} 
-        {routeCoordinates.length > 0 && (
-          <MapView
-            style={styles.mapView}
-            provider={PROVIDER_GOOGLE} // Use Google Maps
-            initialRegion={initialRegion}
-            showsUserLocation={false}
-            showsPointsOfInterest={false}
-          >
-            {/* ---> TEMPORARILY COMMENT OUT POLYLINE AND MARKERS <--- */}
-            {/* 
-            <Polyline
-              coordinates={routeCoordinates}
-              strokeColor={COLORS.primary} // Route color
-              strokeWidth={4}
-            />
-            
-            {routeResult.recommendedStops.map((stop, index) => (
-              <Marker
-                key={`stop-marker-${index}`}
-                coordinate={stop.location} // Use the location object directly
-                title={`Stop ${index + 1}`}
-                description={stop.location.address}
-                pinColor={index === 0 ? 'green' : index === routeResult.recommendedStops.length - 1 ? 'red' : 'blue'}
-              />
-            ))}
-            */}
-          </MapView>
+        {/* Use a standalone conditional for the MapView to ensure it renders properly */}
+        {routeResult.recommendedStops && routeResult.recommendedStops.length > 0 && (
+          <View style={styles.mapContainer}>
+            <MapView
+              style={styles.map}
+              region={initialRegion}
+              provider={Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE}
+              zoomEnabled={true}
+              rotateEnabled={true}
+              scrollEnabled={true}
+              pitchEnabled={true}
+            >
+              {/* Display the route polyline */}
+              {routeCoordinates && routeCoordinates.length > 0 && (
+                <Polyline
+                  coordinates={routeCoordinates}
+                  strokeColor={COLORS.primary}
+                  strokeWidth={4}
+                />
+              )}
+              
+              {/* Add markers for each stop */}
+              {routeResult.recommendedStops.map((stop, index) => (
+                <Marker
+                  key={`stop-marker-${index}`}
+                  coordinate={{
+                    latitude: stop.location.latitude,
+                    longitude: stop.location.longitude
+                  }}
+                  title={`Stop ${index + 1}`}
+                  description={stop.location.address}
+                  pinColor={index === 0 ? 'green' : index === routeResult.recommendedStops.length - 1 ? 'red' : 'blue'}
+                />
+              ))}
+            </MapView>
+          </View>
         )}
 
         <FlatList
@@ -1603,7 +1668,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 8,
   },
-  mapView: {
+  map: {
     height: 250, // Adjust height as needed
     width: '100%',
     marginBottom: 20,
@@ -1642,6 +1707,13 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     marginRight: 4,
     fontWeight: '500',
+  },
+  mapContainer: {
+    width: '100%',
+    height: 250,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 20,
   },
 });
 

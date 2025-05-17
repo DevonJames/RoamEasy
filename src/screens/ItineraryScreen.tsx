@@ -68,6 +68,9 @@ const ItineraryScreen = () => {
   const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
   const [isLoadingRoute, setIsLoadingRoute] = useState<boolean>(false);
 
+  // Add state for map expansion
+  const [isMapExpanded, setIsMapExpanded] = useState<boolean>(false);
+
   useEffect(() => {
     // Load the trip details when component mounts
     if (tripId) {
@@ -398,7 +401,7 @@ const ItineraryScreen = () => {
     </View>
   );
 
-  // Update the renderMap function to use the route data
+  // Update the renderMap function to include an expand/collapse button
   const renderMap = () => {
     if (mapError || !currentTrip?.stops || currentTrip.stops.length === 0) {
       return null;
@@ -406,9 +409,9 @@ const ItineraryScreen = () => {
     
     try {
       // Prepare coordinates for each stop
-      const coordinates = currentTrip.stops
+      const stopCoordinates = currentTrip.stops
         .sort((a, b) => a.stop_order - b.stop_order)
-        .map((stop: TripStop) => {
+        .map((stop: TripStop, index: number) => {
           // Try to extract coordinates from location property or notes
           let latitude, longitude;
           
@@ -425,18 +428,29 @@ const ItineraryScreen = () => {
           }
           
           if (latitude && longitude) {
-            return { latitude, longitude };
+            console.log(`Found coordinates for stop ${index + 1}: ${latitude}, ${longitude}`);
+            return { 
+              latitude, 
+              longitude,
+              stopId: stop.id,
+              stopOrder: stop.stop_order,
+              resort: stop.resort,
+              index: index // Keep track of the index for determining marker color
+            };
           }
+          console.log(`No coordinates found for stop ${index + 1}`);
           return null;
         })
         .filter(coord => coord !== null);
       
-      if (coordinates.length < 2) {
+      console.log(`Total stops with coordinates: ${stopCoordinates.length}`);
+      
+      if (stopCoordinates.length < 2) {
         return null; // Need at least 2 points for a route line
       }
       
       return (
-        <View style={styles.mapContainer}>
+        <View style={[styles.mapContainer, isMapExpanded && styles.expandedMapContainer]}>
           {isLoadingRoute && (
             <View style={styles.mapLoadingOverlay}>
               <ActivityIndicator size="large" color="#2E7D32" />
@@ -446,6 +460,10 @@ const ItineraryScreen = () => {
             style={styles.map}
             region={mapRegion}
             provider={Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE}
+            zoomEnabled={true}
+            rotateEnabled={true}
+            scrollEnabled={true}
+            pitchEnabled={true}
           >
             {/* Display route line using fetched coordinate data if available */}
             {routeCoordinates.length > 0 ? (
@@ -456,12 +474,60 @@ const ItineraryScreen = () => {
               />
             ) : (
               <Polyline
-                coordinates={coordinates.filter(Boolean)}
+                coordinates={stopCoordinates.map(coord => ({latitude: coord.latitude, longitude: coord.longitude}))}
                 strokeColor="#2E7D32" // Forest Green from your color palette
                 strokeWidth={3}
               />
             )}
+            
+            {/* Add markers for each stop - Map each stop coordinate to a marker */}
+            {stopCoordinates.map((coord) => {
+              // Log each marker being created
+              console.log(`Creating marker for stop ${coord.index + 1} at ${coord.latitude}, ${coord.longitude}`);
+              
+              return (
+                <Marker
+                  key={`marker-${coord.stopId || coord.index}`}
+                  coordinate={{
+                    latitude: coord.latitude,
+                    longitude: coord.longitude
+                  }}
+                  title={coord.resort?.name || `Stop ${coord.index + 1}`}
+                  description={`Day ${coord.index + 1} of your trip`}
+                  pinColor={
+                    coord.index === 0 ? 'green' : 
+                    coord.index === stopCoordinates.length - 1 ? 'red' : 
+                    'blue'
+                  }
+                  onPress={() => {
+                    // Show a callout first
+                    // Then if user taps on the callout/info window, navigate to resort selection
+                    if (coord.stopId) {
+                      console.log(`Marker pressed for stop ${coord.index + 1}`);
+                    }
+                  }}
+                  onCalloutPress={() => {
+                    if (coord.stopId) {
+                      console.log(`Callout pressed for stop ${coord.index + 1}`);
+                      navigateToResortDetails(coord.stopId);
+                    }
+                  }}
+                />
+              );
+            })}
           </MapView>
+          
+          {/* Add expand/collapse button */}
+          <TouchableOpacity 
+            style={styles.mapExpandButton} 
+            onPress={() => setIsMapExpanded(!isMapExpanded)}
+            accessible={true}
+            accessibilityLabel={isMapExpanded ? "Collapse map" : "Expand map"}
+          >
+            <Text style={styles.mapExpandButtonText}>
+              {isMapExpanded ? "Collapse Map" : "Expand Map"}
+            </Text>
+          </TouchableOpacity>
         </View>
       );
     } catch (err) {
@@ -646,22 +712,27 @@ const ItineraryScreen = () => {
       {/* Add the map view here */}
       {renderMap()}
       
-      {isLoading ? (
-        <ActivityIndicator size="large" color="#2E7D32" style={styles.loader} />
-      ) : error ? (
-        <Text style={styles.errorText}>{error}</Text>
-      ) : !currentTrip ? (
-        <Text style={styles.errorText}>Trip not found</Text>
-      ) : !currentTrip.stops || currentTrip.stops.length === 0 ? (
-        <Text style={styles.noStopsText}>No stops in this trip yet. Add some in the route planner.</Text>
-      ) : (
-        <FlatList
-          data={currentTrip.stops.sort((a, b) => a.stop_order - b.stop_order)}
-          renderItem={renderStopItem}
-          keyExtractor={(item) => item.id}
-          style={styles.stopsList}
-          contentContainerStyle={styles.stopsListContent}
-        />
+      {/* Only show the list if map is not expanded */}
+      {!isMapExpanded && (
+        <>
+          {isLoading ? (
+            <ActivityIndicator size="large" color="#2E7D32" style={styles.loader} />
+          ) : error ? (
+            <Text style={styles.errorText}>{error}</Text>
+          ) : !currentTrip ? (
+            <Text style={styles.errorText}>Trip not found</Text>
+          ) : !currentTrip.stops || currentTrip.stops.length === 0 ? (
+            <Text style={styles.noStopsText}>No stops in this trip yet. Add some in the route planner.</Text>
+          ) : (
+            <FlatList
+              data={currentTrip.stops.sort((a, b) => a.stop_order - b.stop_order)}
+              renderItem={renderStopItem}
+              keyExtractor={(item) => item.id}
+              style={styles.stopsList}
+              contentContainerStyle={styles.stopsListContent}
+            />
+          )}
+        </>
       )}
     </SafeAreaView>
   );
@@ -890,6 +961,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 8,
     overflow: 'hidden',
+    position: 'relative', // for absolute positioning of the expand button
+  },
+  expandedMapContainer: {
+    height: Dimensions.get('window').height - 150, // Full height minus header space
+    marginBottom: 0,
+    borderRadius: 0,
   },
   map: {
     width: '100%',
@@ -919,6 +996,31 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  mapExpandButton: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    backgroundColor: 'rgba(46, 125, 50, 0.9)', // Increase opacity
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    elevation: 5, // Increase elevation for Android
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, // Increase shadow opacity
+    shadowRadius: 3,
+    borderWidth: 1,
+    borderColor: 'white',
+    zIndex: 999, // Ensure it appears above other elements
+  },
+  mapExpandButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16, // Larger text
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
 });
 
